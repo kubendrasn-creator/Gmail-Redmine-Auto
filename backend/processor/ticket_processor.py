@@ -50,34 +50,7 @@ class TicketProcessor:
 
         print("Support ticket detected.")
 
-        # 5. Generate PDF
-        output_dir = Path("generated_emails")
-        output_dir.mkdir(exist_ok=True)
-
-        output_path = output_dir / "temporary_support_email.pdf"
-
-        self.pdf_generator.generate(
-            email,
-            str(output_path),
-        )
-
-        print(f"PDF created: {output_path}")
-
-        # 6. Upload PDF to Redmine
-        token = self.redmine.upload_attachment(
-            str(output_path)
-        )
-
-        print("PDF uploaded to Redmine.")
-
-        # 7. Prepare attachment
-        attachment = {
-            "token": token,
-            "filename": output_path.name,
-            "content_type": "application/pdf",
-        }
-
-        # 8. Create Redmine Support ticket
+        # 5. Create Redmine Support ticket first
         result = self.redmine.create_issue(
             project_id=REDMINE_PROJECT_ID,
             subject=email["subject"],
@@ -87,14 +60,51 @@ class TicketProcessor:
                 "Please review the attached original email and "
                 "validate the issue details before proceeding."
             ),
-            attachment=attachment,
         )
 
         issue = result["issue"]
+        issue_id = issue["id"]
 
         print("Redmine ticket created.")
-        print(f"Issue ID: {issue['id']}")
+        print(f"Issue ID: {issue_id}")
         print(f"Subject: {issue['subject']}")
         print(f"Tracker: {issue['tracker']['name']}")
+
+        # 6. Generate PDF using the Redmine issue ID
+        output_dir = Path("generated_emails")
+        output_dir.mkdir(exist_ok=True)
+
+        output_path = output_dir / f"{issue_id}.pdf"
+
+        self.pdf_generator.generate(
+            email,
+            str(output_path),
+        )
+
+        print(f"PDF created: {output_path}")
+
+        # 7. Upload PDF to Redmine
+        token = self.redmine.upload_attachment(
+            str(output_path)
+        )
+
+        print("PDF uploaded to Redmine.")
+
+        # 8. Prepare attachment
+        attachment = {
+            "token": token,
+            "filename": output_path.name,
+            "content_type": "application/pdf",
+        }
+
+        # 9. Attach PDF to the newly created issue
+        self.redmine.attach_file_to_issue(
+            issue_id,
+            attachment,
+        )
+
+        print(
+            f"PDF attached to Redmine issue #{issue_id}."
+        )
 
         return issue

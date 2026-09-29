@@ -81,11 +81,14 @@ class GmailClient:
             hours=GMAIL_LOOKBACK_HOURS
         )
 
+        cutoff_timestamp = int(cutoff_time.timestamp())
+
         response = (
             self.service.users()
             .messages()
             .list(
                 userId="me",
+                q=f"after:{cutoff_timestamp}",
                 maxResults=GMAIL_MAX_RESULTS,
             )
             .execute()
@@ -96,14 +99,12 @@ class GmailClient:
         recent_messages = []
 
         for message in messages:
-            message_id = message["id"]
-
             full_message = (
                 self.service.users()
                 .messages()
                 .get(
                     userId="me",
-                    id=message_id,
+                    id=message["id"],
                     format="minimal",
                 )
                 .execute()

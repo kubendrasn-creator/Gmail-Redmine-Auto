@@ -1,3 +1,19 @@
 [
-  "1a0e7f297aeef909"
+  "1a0e7f297aeef909",
+  {
+    "message_id": "1a0ec0535abc5838",
+    "subject": "Incident Issue",
+    "ticket_type": "Support",
+    "status": "ticket_created",
+    "redmine_issue_id": 11,
+    "processed_at": "2026-09-29T07:25:23.080322+00:00"
+  },
+  {
+    "message_id": "1a0e80ccbe6f3552",
+    "subject": "Meeting",
+    "ticket_type": null,
+    "status": "not_a_ticket",
+    "redmine_issue_id": null,
+    "processed_at": "2026-09-29T07:25:23.717679+00:00"
+  }
 ]

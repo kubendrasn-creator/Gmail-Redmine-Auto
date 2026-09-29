@@ -77,10 +77,9 @@ class RedmineClient:
         project_id,
         subject,
         description,
-        attachment=None,
     ):
         """
-        Create a new issue in Redmine.
+        Create a new Support issue in Redmine.
         """
 
         url = f"{self.base_url}/issues.json"
@@ -92,15 +91,6 @@ class RedmineClient:
             "subject": subject,
             "description": description,
         }
-
-        if attachment:
-            issue["uploads"] = [
-                {
-                    "token": attachment["token"],
-                    "filename": attachment["filename"],
-                    "content_type": attachment["content_type"],
-                }
-            ]
 
         payload = {
             "issue": issue
@@ -144,3 +134,42 @@ class RedmineClient:
             response.raise_for_status()
 
         return response.json()["upload"]["token"]
+
+    
+    def attach_file_to_issue(self, issue_id, attachment):
+        """
+        Attach an uploaded Redmine file to an existing issue.
+        """
+
+        url = f"{self.base_url}/issues/{issue_id}.json"
+
+        payload = {
+            "issue": {
+                "uploads": [
+                    {
+                        "token": attachment["token"],
+                        "filename": attachment["filename"],
+                        "content_type": attachment["content_type"],
+                    }
+                ]
+            }
+        }
+
+        response = requests.put(
+            url,
+            headers=self.headers,
+            json=payload,
+            timeout=10,
+        )
+
+        if not response.ok:
+            print("Redmine attachment failed")
+            print("Status:", response.status_code)
+            print("Response:", response.text)
+            response.raise_for_status()
+
+        # Redmine may return an empty successful response.
+        if not response.text.strip():
+            return None
+
+        return response.json()
