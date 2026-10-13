@@ -3,14 +3,15 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
-env/
 
 # Environment & Credentials
 .env
-env/.env
 env/credentials.json
 env/token.json
 # But keep the example file
+!env/.env.example
+# Ignore everything else in env folder
+env/*
 !env/.env.example
 
 # Logs & Temporary processing directories
