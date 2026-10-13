@@ -1,11 +1,22 @@
 import requests
+from datetime import date
 
 from backend.config.settings import (
     REDMINE_API_KEY,
     REDMINE_URL,
     REDMINE_SUPPORT_TRACKER_ID,
     REDMINE_ASSIGNEE_ID,
+    REDMINE_CATEGORY_CUSTOM_FIELD_ID,
+    REDMINE_CATEGORY_VALUE,
+    REDMINE_SEVERITY_CUSTOM_FIELD_ID,
+    REDMINE_SEVERITY_VALUE,
+    REDMINE_ESTIMATED_HOURS,
+    REDMINE_START_DATE,
+    REDMINE_END_DATE,
 )
+from backend.utils.logger import get_logger
+
+logger = get_logger("redmine")
 
 
 class RedmineClient:
@@ -25,51 +36,39 @@ class RedmineClient:
         """
         Retrieve projects from Redmine.
         """
-
         url = f"{self.base_url}/projects.json"
-
         response = requests.get(
             url,
             headers=self.headers,
             timeout=10,
         )
-
         response.raise_for_status()
-
         return response.json()
 
     def get_current_user(self):
         """
         Retrieve the Redmine user associated with the API key.
         """
-
         url = f"{self.base_url}/users/current.json"
-
         response = requests.get(
             url,
             headers=self.headers,
             timeout=10,
         )
-
         response.raise_for_status()
-
         return response.json()
 
     def get_trackers(self):
         """
         Retrieve all trackers configured in Redmine.
         """
-
         url = f"{self.base_url}/trackers.json"
-
         response = requests.get(
             url,
             headers=self.headers,
             timeout=10,
         )
-
         response.raise_for_status()
-
         return response.json()
 
     def create_issue(
@@ -81,8 +80,19 @@ class RedmineClient:
         """
         Create a new Support issue in Redmine.
         """
-
         url = f"{self.base_url}/issues.json"
+
+        start_date = (
+            date.today().isoformat()
+            if REDMINE_START_DATE == "SYSTEM"
+            else REDMINE_START_DATE
+        )
+
+        end_date = (
+            date.today().isoformat()
+            if REDMINE_END_DATE == "SYSTEM"
+            else REDMINE_END_DATE
+        )
 
         issue = {
             "project_id": project_id,
@@ -90,6 +100,19 @@ class RedmineClient:
             "assigned_to_id": REDMINE_ASSIGNEE_ID,
             "subject": subject,
             "description": description,
+            "estimated_hours": REDMINE_ESTIMATED_HOURS,
+            "start_date": start_date,
+            "due_date": end_date,
+            "custom_fields": [
+                {
+                    "id": REDMINE_CATEGORY_CUSTOM_FIELD_ID,
+                    "value": REDMINE_CATEGORY_VALUE,
+                },
+                {
+                    "id": REDMINE_SEVERITY_CUSTOM_FIELD_ID,
+                    "value": REDMINE_SEVERITY_VALUE,
+                },
+            ],
         }
 
         payload = {
@@ -103,16 +126,16 @@ class RedmineClient:
             timeout=10,
         )
 
-        response.raise_for_status()
+        if not response.ok:
+            logger.error(f"Redmine create issue failed (HTTP {response.status_code}): {response.text}")
+            response.raise_for_status()
 
         return response.json()
-
 
     def upload_attachment(self, file_path):
         """
         Upload a file to Redmine and return the upload token.
         """
-
         url = f"{self.base_url}/uploads.json"
 
         with open(file_path, "rb") as file:
@@ -127,20 +150,15 @@ class RedmineClient:
             )
 
         if not response.ok:
-            print("Redmine upload failed")
-            print("Status:", response.status_code)
-            print("Response:", response.text)
-
+            logger.error(f"Redmine upload failed (HTTP {response.status_code}): {response.text}")
             response.raise_for_status()
 
         return response.json()["upload"]["token"]
 
-    
     def attach_file_to_issue(self, issue_id, attachment):
         """
         Attach an uploaded Redmine file to an existing issue.
         """
-
         url = f"{self.base_url}/issues/{issue_id}.json"
 
         payload = {
@@ -163,13 +181,36 @@ class RedmineClient:
         )
 
         if not response.ok:
-            print("Redmine attachment failed")
-            print("Status:", response.status_code)
-            print("Response:", response.text)
+            logger.error(f"Redmine attachment failed (HTTP {response.status_code}): {response.text}")
             response.raise_for_status()
 
-        # Redmine may return an empty successful response.
-        if not response.text.strip():
-            return None
+        if response.text.strip():
+            return response.json()
+        return None
 
-        return response.json()
+    def add_issue_note(self, issue_id, note):
+        """
+        Add a note/comment to an existing Redmine issue.
+        """
+        url = f"{self.base_url}/issues/{issue_id}.json"
+
+        payload = {
+            "issue": {
+                "notes": note
+            }
+        }
+
+        response = requests.put(
+            url,
+            headers=self.headers,
+            json=payload,
+            timeout=10,
+        )
+
+        if not response.ok:
+            logger.error(f"Redmine note update failed (HTTP {response.status_code}): {response.text}")
+            response.raise_for_status()
+
+        if response.text.strip():
+            return response.json()
+        return None

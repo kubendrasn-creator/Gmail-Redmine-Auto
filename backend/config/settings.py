@@ -17,11 +17,46 @@ load_dotenv(ENV_FILE)
 # Redmine configuration
 REDMINE_URL = os.getenv("REDMINE_URL")
 REDMINE_API_KEY = os.getenv("REDMINE_API_KEY")
-REDMINE_PROJECT_ID = int(os.getenv("REDMINE_PROJECT_ID"))
-REDMINE_SUPPORT_TRACKER_ID = int(os.getenv("REDMINE_SUPPORT_TRACKER_ID"))
-REDMINE_ASSIGNEE_ID = int(os.getenv("REDMINE_ASSIGNEE_ID"))
-GMAIL_MAX_RESULTS = int(os.getenv("GMAIL_MAX_RESULTS"))
-GMAIL_LOOKBACK_HOURS = int(os.getenv("GMAIL_LOOKBACK_HOURS"))
+REDMINE_PROJECT_ID = int(os.getenv("REDMINE_PROJECT_ID") or 0)
+REDMINE_SUPPORT_TRACKER_ID = int(os.getenv("REDMINE_SUPPORT_TRACKER_ID") or 0)
+REDMINE_ASSIGNEE_ID = int(os.getenv("REDMINE_ASSIGNEE_ID") or 0)
+
+REDMINE_CATEGORY_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_CATEGORY_CUSTOM_FIELD_ID") or 0)
+REDMINE_CATEGORY_VALUE = os.getenv("REDMINE_CATEGORY_VALUE")
+
+REDMINE_SEVERITY_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_SEVERITY_CUSTOM_FIELD_ID") or 0)
+REDMINE_SEVERITY_VALUE = os.getenv("REDMINE_SEVERITY_VALUE")
+
+REDMINE_ESTIMATED_HOURS = int(os.getenv("REDMINE_ESTIMATED_HOURS") or 0)
+REDMINE_START_DATE = os.getenv("REDMINE_START_DATE")
+REDMINE_END_DATE = os.getenv("REDMINE_END_DATE")
+
+# Gmail configuration
+GMAIL_MAX_RESULTS = int(os.getenv("GMAIL_MAX_RESULTS") or 10)
+GMAIL_LOOKBACK_HOURS = int(os.getenv("GMAIL_LOOKBACK_HOURS") or 24)
+
+GMAIL_ALLOWED_SENDERS = [
+    email.strip().lower()
+    for email in os.getenv(
+        "GMAIL_ALLOWED_SENDERS",
+        ""
+    ).split(",")
+    if email.strip()
+]
+
+# AI Classification configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Retention configuration
+PROCESSED_MESSAGE_RETENTION_DAYS = int(os.getenv("PROCESSED_MESSAGE_RETENTION_DAYS", "30"))
+THREAD_RETENTION_DAYS = int(os.getenv("THREAD_RETENTION_DAYS", "180"))
+
+# Paths and directories
+LOG_FILE_PATH = BASE_DIR / "data" / "logs" / "gmail_redmine.log"
+GENERATED_EMAILS_DIR = BASE_DIR / "generated_emails"
+EMAIL_ATTACHMENTS_DIR = BASE_DIR / "email_attachments"
+DATABASE_DIR = BASE_DIR / "data" / "database"
+
 
 def validate_settings():
     """
@@ -44,12 +79,27 @@ def validate_settings():
     
     if not REDMINE_ASSIGNEE_ID:
         missing.append("REDMINE_ASSIGNEE_ID")
+    
+    if not REDMINE_CATEGORY_CUSTOM_FIELD_ID:
+        missing.append("REDMINE_CATEGORY_CUSTOM_FIELD_ID")
+    
+    if not REDMINE_CATEGORY_VALUE:
+        missing.append("REDMINE_CATEGORY_VALUE")
+    
+    if not REDMINE_SEVERITY_CUSTOM_FIELD_ID:
+        missing.append("REDMINE_SEVERITY_CUSTOM_FIELD_ID")
+    
+    if not REDMINE_SEVERITY_VALUE:
+        missing.append("REDMINE_SEVERITY_VALUE")
 
     if not GMAIL_MAX_RESULTS:
         missing.append("GMAIL_MAX_RESULTS")
 
     if not GMAIL_LOOKBACK_HOURS:
         missing.append("GMAIL_LOOKBACK_HOURS")
+    
+    if not GMAIL_ALLOWED_SENDERS:
+        missing.append("GMAIL_ALLOWED_SENDERS")
 
     if missing:
         raise RuntimeError(

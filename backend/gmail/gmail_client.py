@@ -1,17 +1,19 @@
 from pathlib import Path
+import base64
+from datetime import datetime, timedelta, timezone
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-from datetime import datetime, timedelta, timezone
-
 from backend.config.settings import (
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
 )
+from backend.utils.logger import get_logger
 
+logger = get_logger("gmail")
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -36,34 +38,41 @@ class GmailClient:
         """
         Authenticate the application with Gmail.
         """
-
         credentials = None
 
         if TOKEN_FILE.exists():
-            credentials = Credentials.from_authorized_user_file(
-                TOKEN_FILE,
-                SCOPES,
-            )
+            try:
+                credentials = Credentials.from_authorized_user_file(
+                    TOKEN_FILE,
+                    SCOPES,
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to load token file: {exc}")
 
         if not credentials or not credentials.valid:
-
+            refreshed = False
             if credentials and credentials.expired and credentials.refresh_token:
-                credentials.refresh(Request())
+                try:
+                    logger.info("Refreshing expired Gmail OAuth token...")
+                    credentials.refresh(Request())
+                    refreshed = True
+                except Exception as exc:
+                    logger.warning(f"Could not refresh token ({exc}). Starting fresh login flow...")
+                    credentials = None
 
-            else:
+            if not refreshed:
+                logger.info("Authenticating with Gmail OAuth flow...")
                 flow = InstalledAppFlow.from_client_secrets_file(
                     CREDENTIALS_FILE,
                     SCOPES,
                 )
-
-                credentials = flow.run_local_server(
-                    port=0
-                )
+                credentials = flow.run_local_server(port=0)
 
             TOKEN_FILE.write_text(
                 credentials.to_json(),
                 encoding="utf-8",
             )
+            logger.info("Saved updated Gmail OAuth token.")
 
         return build(
             "gmail",
@@ -73,15 +82,14 @@ class GmailClient:
 
     def get_messages(self):
         """
-        Retrieve Gmail messages received within the configured
-        lookback period.
+        Retrieve Gmail messages received within the configured lookback period.
         """
-
         cutoff_time = datetime.now(timezone.utc) - timedelta(
             hours=GMAIL_LOOKBACK_HOURS
         )
-
         cutoff_timestamp = int(cutoff_time.timestamp())
+
+        logger.info(f"Querying Gmail messages with lookback of {GMAIL_LOOKBACK_HOURS}h (after {cutoff_timestamp})...")
 
         response = (
             self.service.users()
@@ -95,7 +103,6 @@ class GmailClient:
         )
 
         messages = response.get("messages", [])
-
         recent_messages = []
 
         for message in messages:
@@ -111,7 +118,6 @@ class GmailClient:
             )
 
             internal_date = full_message.get("internalDate")
-
             if not internal_date:
                 continue
 
@@ -129,7 +135,6 @@ class GmailClient:
         """
         Retrieve a complete Gmail message.
         """
-
         return (
             self.service.users()
             .messages()
@@ -140,3 +145,83 @@ class GmailClient:
             )
             .execute()
         )
+
+    def download_attachments(self, message_id, output_dir):
+        """
+        Download all actual file attachments from a Gmail message.
+
+        Returns a list containing:
+            {
+                "path": "...",
+                "filename": "...",
+                "content_type": "..."
+            }
+        """
+        raw_email = self.get_message(message_id)
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        attachments = []
+
+        def process_part(part):
+            filename = part.get("filename")
+            body = part.get("body", {})
+            attachment_id = body.get("attachmentId")
+
+            # Only process actual named attachments.
+            if filename and attachment_id:
+                attachment_response = (
+                    self.service.users()
+                    .messages()
+                    .attachments()
+                    .get(
+                        userId="me",
+                        messageId=message_id,
+                        id=attachment_id,
+                    )
+                    .execute()
+                )
+
+                data = attachment_response.get("data")
+                if not data:
+                    return
+
+                file_data = base64.urlsafe_b64decode(
+                    data + "=" * (-len(data) % 4)
+                )
+
+                file_path = output_dir / filename
+
+                # Avoid accidentally overwriting another attachment with the same filename.
+                if file_path.exists():
+                    stem = file_path.stem
+                    suffix = file_path.suffix
+                    counter = 1
+                    while file_path.exists():
+                        file_path = output_dir / f"{stem}_{counter}{suffix}"
+                        counter += 1
+
+                file_path.write_bytes(file_data)
+
+                attachments.append(
+                    {
+                        "path": str(file_path),
+                        "filename": file_path.name,
+                        "content_type": part.get(
+                            "mimeType",
+                            "application/octet-stream",
+                        ),
+                    }
+                )
+
+            for child_part in part.get("parts", []):
+                process_part(child_part)
+
+        payload = raw_email.get("payload", {})
+        process_part(payload)
+
+        return attachments

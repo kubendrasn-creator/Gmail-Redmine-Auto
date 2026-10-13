@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# Environment & Credentials
+.env
+env/.env
+env/credentials.json
+env/token.json
+# But keep the example file
+!env/.env.example
+
+# Logs & Temporary processing directories
+data/logs/*
+!data/logs/.gitkeep
+generated_emails/*
+!generated_emails/.gitkeep
+email_attachments/*
+!email_attachments/.gitkeep
+temp_attachments/*
+!temp_attachments/.gitkeep
+*.pdf
