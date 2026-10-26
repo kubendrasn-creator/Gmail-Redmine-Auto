@@ -2,7 +2,7 @@ import concurrent.futures
 import uuid
 
 from backend.config.settings import REDMINE_PROJECT_ID
-from backend.confirm import (
+from backend.processor.confirmation import (
     ConfirmAction,
     ConfirmResult,
     ReplyAction,

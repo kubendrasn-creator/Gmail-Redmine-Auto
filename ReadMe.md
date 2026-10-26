@@ -4,7 +4,7 @@ Automated Gmail to Redmine ticket creation with AI-powered email classification.
 
 ## Features
 
-- **AI-Powered Classification**: Uses Google Gemini 2.5 Flash for intelligent email classification
+- **AI-Powered Classification**: Uses Google Gemini 3.1 Flash-Lite for intelligent email classification
 - **Smart Attachment Handling**: Compresses oversized videos, skips files that exceed limits
 - **Link Detection**: Extracts external service links (Google Drive, Dropbox, YouTube, etc.)
 - **Preflight Validation**: Validates configuration and dependencies before processing
@@ -33,8 +33,8 @@ REDMINE_SUPPORT_TRACKER_ID=1
 REDMINE_ASSIGNEE_ID=1
 
 # Built-in Issue Category (Redmine's native category field)
+# Set this to the numeric category ID from your Redmine project.
 REDMINE_ISSUES_CATEGORY=1
-REDMINE_ISSUES_CATEGORY_VALUE=General/ALL modules
 
 # Custom Fields (optional)
 REDMINE_CATEGORY_CUSTOM_FIELD_ID=1
@@ -54,8 +54,8 @@ GMAIL_ALLOWED_SENDERS=user1@example.com,user2@example.com
 # AI Classification Configuration (Optional but Recommended)
 GEMINI_API_KEY=your_gemini_api_key
 AI_MAX_INPUT_CHARS=12000
-ALLOWED_MODULES=Module1,Module2,Module3
-REDMINE_TEXT_FORMAT=textile
+# Optional comma-separated module names from your Redmine project. Leave blank to allow any.
+ALLOWED_MODULES=
 
 # Attachment Configuration
 REDMINE_MAX_ATTACHMENT_MB=10
@@ -163,15 +163,27 @@ When you first run the application, it will:
 
 The token file is refreshed automatically when it expires.
 
-## AI Classification (Gemini 2.5 Flash)
+## AI Classification (Gemini 3.1 Flash-Lite)
 
-The system uses Google's Gemini 2.5 Flash model for intelligent email classification:
+The system uses Google's Gemini 3.1 Flash-Lite model for intelligent email classification:
 
 - **Classifies emails** as support tickets vs. regular emails
 - **Extracts metadata**: center, module, description
 - **Handles forwarded emails** and casual bug reports
 - **Provides reasoning** for classification decisions
 - **Falls back** to rule-based classification if AI fails
+
+`ALLOWED_MODULES` is an optional comma-separated allow-list of module names used by
+your project, for example `ALLOWED_MODULES=Admissions,Billing,Reporting`. Names are
+matched exactly (including case). If the classifier returns a module not in the list,
+the module is cleared and the email is marked as missing module information so it can
+be reviewed. Leave the setting empty to accept any extracted module.
+
+Textile is a markup format (for example, for headings, links, and lists). The old
+`REDMINE_TEXT_FORMAT` setting was not read by the application and did not change
+ticket descriptions. The app sends the description text to Redmine, where rendering
+is governed by your Redmine instance. The unused variable has been removed; configure
+description formatting in Redmine itself if needed.
 
 ## Attachment Handling
 
@@ -203,12 +215,10 @@ Gmail-Redmine/
 │   ├── gmail/
 │   ├── redmine/
 │   ├── ticketing/
-│   ├── processor/
-│   ├── storage/
-│   ├── preflight.py      (Preflight validation)
-│   ├── attachments.py    (Attachment pipeline)
-│   ├── links.py          (Link detection)
-│   ├── retry.py          (Retry/backoff logic)
+│   ├── processor/        (Message workflow, attachments, and confirmation)
+│   ├── storage/          (Processed-message data and attachment retention)
+│   ├── utils/            (Preflight, links, logging, prompts, and retry)
+│   ├── web/              (Local review server and static UI)
 │   └── main.py
 ├── data/
 │   ├── database/

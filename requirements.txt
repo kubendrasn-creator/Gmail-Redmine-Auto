@@ -9,7 +9,5 @@ pydantic==2.5.0
 tenacity==8.2.3
 
 reportlab==4.0.7
-pytest==7.4.3
-pytest-mock==3.12.0
 fastapi==0.115.12
 uvicorn==0.34.2

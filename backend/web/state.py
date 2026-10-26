@@ -101,7 +101,12 @@ class AppState:
         with self.lock:
             self.shutdown_requested = True
             pending = tuple(self.futures.values())
-        from backend.confirm import ConfirmAction, ConfirmResult, ReplyAction, ReplyDecision
+        from backend.processor.confirmation import (
+            ConfirmAction,
+            ConfirmResult,
+            ReplyAction,
+            ReplyDecision,
+        )
 
         for future, reply in pending:
             if not future.done():

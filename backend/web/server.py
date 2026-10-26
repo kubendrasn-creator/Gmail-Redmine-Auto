@@ -22,7 +22,7 @@ from backend.config.settings import (
     WEB_AUTO_OPEN_BROWSER,
     WEB_PORT,
 )
-from backend.confirm import (
+from backend.processor.confirmation import (
     ConfirmAction,
     ConfirmResult,
     ReplyAction,

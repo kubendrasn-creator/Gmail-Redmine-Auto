@@ -17,7 +17,7 @@ from backend.config.settings import (
     GENERATED_EMAILS_DIR,
     EMAIL_ATTACHMENTS_DIR,
 )
-from backend.confirm import (
+from backend.processor.confirmation import (
     CliConfirmer,
     Confirmer,
     ConfirmAction,

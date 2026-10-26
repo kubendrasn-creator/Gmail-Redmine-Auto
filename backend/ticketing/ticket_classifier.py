@@ -9,7 +9,6 @@ from backend.config.settings import (
     AI_MAX_INPUT_CHARS,
     ALLOWED_MODULES,
     GEMINI_API_KEY,
-    REDMINE_TEXT_FORMAT,
 )
 from backend.utils.logger import get_logger
 
@@ -112,7 +111,7 @@ Response: is_ticket=false, category="noise", issue_evidence=null, attachment_dep
 
 class TicketClassifier:
     """
-    AI-powered email classifier using Gemini 2.5 Flash.
+    AI-powered email classifier using Gemini 3.1 Flash-Lite.
     Determines whether an email should become a Redmine Support ticket.
     """
 
