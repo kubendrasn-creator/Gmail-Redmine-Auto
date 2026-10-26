@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gmail → Redmine Review</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LOCAL REVIEW WORKSPACE</p>
+      <h1>Gmail <span aria-hidden="true">→</span> Redmine</h1>
+    </div>
+    <div class="run-controls">
+      <span id="run-state" class="state-chip">IDLE</span>
+      <label class="toggle">
+        <input id="dry-run" type="checkbox">
+        <span>Dry run</span>
+      </label>
+      <button id="fetch-button" class="primary">Fetch emails</button>
+    </div>
+  </header>
+
+  <section class="status-strip" aria-label="Application status">
+    <button id="preflight-button" class="status-badge">Preflight: checking</button>
+    <span id="ffmpeg-status">FFmpeg: checking</span>
+    <span id="attachment-limit">Attachment limit: —</span>
+    <span id="counts">Pending 0 · Created 0 · Rejected 0</span>
+  </section>
+  <section id="preflight-panel" class="preflight-panel" hidden>
+    <h2>Preflight checks</h2>
+    <div id="preflight-checks"></div>
+  </section>
+
+  <main class="workspace">
+    <aside class="queue-panel" aria-label="Review queue">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">INBOX</p>
+          <h2>Review queue</h2>
+        </div>
+        <span id="queue-total" class="count-pill">0</span>
+      </div>
+      <div class="filters">
+        <label>Status
+          <select id="status-filter">
+            <option value="">All statuses</option>
+            <option>PENDING</option>
+            <option>CREATED</option>
+            <option>ATTACHED</option>
+            <option>REJECTED</option>
+            <option>SKIPPED</option>
+            <option>FAILED</option>
+          </select>
+        </label>
+        <label>Action
+          <select id="action-filter">
+            <option value="">All actions</option>
+            <option>CREATE</option>
+            <option>REVIEW</option>
+            <option>NEEDS_INFO</option>
+            <option>IGNORE</option>
+            <option>ATTACH_OR_REVIEW</option>
+          </select>
+        </label>
+      </div>
+      <div id="queue-list" class="queue-list" aria-live="polite"></div>
+    </aside>
+
+    <section class="detail-panel" aria-label="Selected email details">
+      <div id="empty-detail" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">✉</div>
+        <h2>Nothing selected</h2>
+        <p>Fetch emails to build a review queue, then select a message to inspect it.</p>
+      </div>
+      <div id="detail-content" hidden></div>
+    </section>
+  </main>
+
+  <section id="run-summary" class="run-summary" hidden aria-live="polite"></section>
+  <section class="activity" aria-label="Live activity">
+    <h2>Activity</h2>
+    <div id="activity-lines" role="log" aria-live="polite"></div>
+  </section>
+</body>
+</html>

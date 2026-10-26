@@ -242,6 +242,7 @@ class ProcessedMessageStore:
         original_subject=None,
         original_date=None,
         content_fingerprint=None,
+        issue_description=None,
     ):
         """
         Store processing information for a Gmail message.
@@ -281,6 +282,7 @@ class ProcessedMessageStore:
             "status": status,
             "redmine_issue_id": redmine_issue_id,
             "content_fingerprint": content_fingerprint,
+            "issue_description": issue_description,
             "processed_at": datetime.now(timezone.utc).isoformat(),
         }
 

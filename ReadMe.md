@@ -77,23 +77,56 @@ pip install -r requirements.txt
 python -m backend.main
 ```
 
-Or process a specific message:
+This starts the local review UI and opens it in your browser. Use **Fetch emails** to
+load the review queue; emails are not fetched automatically unless `--auto-run` is
+passed.
+
+Useful options:
 
 ```bash
+# Keep using the original terminal prompts and workflow
+python -m backend.main --no-ui
+
+# Open the UI on a chosen port without opening a browser
+python -m backend.main --port 8080 --no-browser
+
+# Fetch immediately after starting the UI
+python -m backend.main --auto-run
+
+# Review one Gmail message, with the UI
 python -m backend.main --message-id <message_id>
-```
 
-Dry-run mode (no changes to Redmine):
-
-```bash
+# UI dry-run: preview only; do not write to Redmine or processed-message storage
 python -m backend.main --dry-run
 ```
 
-Skip preflight validation:
+Existing options `--skip-preflight`, `--lookback-hours`, and `--max-results` are
+also available. Use `WEB_PORT` and `WEB_AUTO_OPEN_BROWSER` in `env/.env` to set
+the default UI port and browser behavior.
 
-```bash
-python -m backend.main --skip-preflight
-```
+#### Local UI security
+
+The UI binds only to `127.0.0.1`. At startup it creates a random session token and
+opens the browser with that token in the URL; the page keeps it in memory and sends
+it with API requests. The UI removes it from the visible URL after loading. The
+server validates the Host header on every request, checks the Origin on mutating
+requests, and applies a restrictive Content Security Policy. Email content is
+displayed as text, not interpreted as HTML. Do not share the startup URL while the
+server is running.
+
+The pending review queue is stored locally in
+`data/database/pending_items.sqlite3`. It contains email content and stays on this
+computer. Do not commit the database, credentials, OAuth tokens, attachments, or
+generated PDFs.
+
+#### Review decisions
+
+| Decision | Effect |
+| --- | --- |
+| Approve / edit | Create the Redmine ticket, or attach a reply to the selected existing ticket; record the message as processed |
+| Reject | Record the message as rejected so it does not return in later runs |
+| Skip | Leave the message unmarked so it can be reviewed in a later run |
+| Dry-run preview | Show the ticket payload without Redmine writes or processed-message updates |
 
 ## Gmail Setup Requirements
 

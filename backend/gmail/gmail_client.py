@@ -1,6 +1,7 @@
 from pathlib import Path
 import base64
 from datetime import datetime, timedelta, timezone
+import re
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -80,16 +81,18 @@ class GmailClient:
             credentials=credentials,
         )
 
-    def get_messages(self):
+    def get_messages(self, lookback_hours=None, max_results=None):
         """
         Retrieve Gmail messages received within the configured lookback period.
         """
-        cutoff_time = datetime.now(timezone.utc) - timedelta(
-            hours=GMAIL_LOOKBACK_HOURS
+        lookback_hours = (
+            GMAIL_LOOKBACK_HOURS if lookback_hours is None else lookback_hours
         )
+        max_results = GMAIL_MAX_RESULTS if max_results is None else max_results
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         cutoff_timestamp = int(cutoff_time.timestamp())
 
-        logger.info(f"Querying Gmail messages with lookback of {GMAIL_LOOKBACK_HOURS}h (after {cutoff_timestamp})...")
+        logger.info(f"Querying Gmail messages with lookback of {lookback_hours}h (after {cutoff_timestamp})...")
 
         response = (
             self.service.users()
@@ -97,7 +100,7 @@ class GmailClient:
             .list(
                 userId="me",
                 q=f"after:{cutoff_timestamp}",
-                maxResults=GMAIL_MAX_RESULTS,
+                maxResults=max_results,
             )
             .execute()
         )
@@ -194,7 +197,11 @@ class GmailClient:
                     data + "=" * (-len(data) % 4)
                 )
 
-                file_path = output_dir / filename
+                safe_name = Path(str(filename).replace("\\", "/")).name
+                safe_name = re.sub(r'[<>:"/\\|?*]', "_", safe_name).rstrip(" .")
+                if safe_name in ("", ".", ".."):
+                    safe_name = "attachment"
+                file_path = output_dir / safe_name
 
                 # Avoid accidentally overwriting another attachment with the same filename.
                 if file_path.exists():

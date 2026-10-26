@@ -5,12 +5,12 @@ from backend.config.settings import (
     GMAIL_ALLOWED_SENDERS,
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
+    WEB_PORT,
     validate_settings,
 )
 from backend.gmail.gmail_client import GmailClient
 from backend.utils.preflight import PreflightValidator
 from backend.processor.ticket_processor import TicketProcessor
-from backend.storage.message_fingerprint import create_content_fingerprint
 from backend.storage.processed_messages import ProcessedMessageStore
 from backend.utils.logger import get_logger
 
@@ -49,6 +49,27 @@ def main():
         default=None,
         help="Override Gmail max results from config",
     )
+    parser.add_argument(
+        "--no-ui",
+        action="store_true",
+        help="Use the existing terminal workflow instead of the local review UI",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=WEB_PORT,
+        help="Local review UI port (default: WEB_PORT or 8000)",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open a browser automatically",
+    )
+    parser.add_argument(
+        "--auto-run",
+        action="store_true",
+        help="Fetch emails immediately after the local UI starts",
+    )
     args = parser.parse_args()
 
     # Override config if flags provided
@@ -72,6 +93,21 @@ def main():
         print(f"Configuration Error: {exc}")
         sys.exit(1)
 
+    if not args.no_ui:
+        from backend.web.server import run_server
+
+        run_server(
+            port=args.port,
+            no_browser=args.no_browser,
+            auto_run=args.auto_run,
+            default_dry_run=args.dry_run,
+            preflight=checks if not args.skip_preflight else [],
+            message_id=args.message_id,
+            lookback_hours=lookback_hours,
+            max_results=max_results,
+        )
+        return
+
     gmail = GmailClient()
     processor = TicketProcessor(dry_run=args.dry_run)
     store = ProcessedMessageStore()
@@ -81,7 +117,10 @@ def main():
         messages = [{"id": args.message_id.strip()}]
     else:
         logger.info("Starting Gmail -> Redmine automation run...")
-        messages = gmail.get_messages()
+        messages = gmail.get_messages(
+            lookback_hours=lookback_hours,
+            max_results=max_results,
+        )
 
     if not messages:
         logger.info("No emails found in the configured lookback window.")

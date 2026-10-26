@@ -67,6 +67,8 @@ ALLOWED_MODULES = [
 ]
 REDMINE_TEXT_FORMAT = os.getenv("REDMINE_TEXT_FORMAT", "textile")
 REDMINE_MESSAGEID_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_MESSAGEID_CUSTOM_FIELD_ID") or 0)
+WEB_PORT = int(os.getenv("WEB_PORT", "8000"))
+WEB_AUTO_OPEN_BROWSER = os.getenv("WEB_AUTO_OPEN_BROWSER", "true").lower() == "true"
 
 # Retry configuration
 RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "4"))
@@ -76,6 +78,7 @@ LOG_FILE_PATH = BASE_DIR / "data" / "logs" / "gmail_redmine.log"
 EMAIL_DATA_DIR = BASE_DIR / "email_data"
 GENERATED_EMAILS_DIR = EMAIL_DATA_DIR / "generated_emails"
 EMAIL_ATTACHMENTS_DIR = EMAIL_DATA_DIR / "email_attachments"
+ATTACHMENTS_DIR = EMAIL_ATTACHMENTS_DIR
 DATABASE_DIR = BASE_DIR / "data" / "database"
 
 

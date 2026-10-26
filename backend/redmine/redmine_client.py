@@ -1,15 +1,18 @@
 import requests
 from datetime import date
+from typing import Optional
 
 from backend.config.settings import (
     REDMINE_API_KEY,
     REDMINE_URL,
+    REDMINE_PROJECT_ID,
     REDMINE_SUPPORT_TRACKER_ID,
     REDMINE_ASSIGNEE_ID,
     REDMINE_CATEGORY_CUSTOM_FIELD_ID,
     REDMINE_CATEGORY_VALUE,
     REDMINE_ISSUES_CATEGORY,
     REDMINE_ISSUES_CATEGORY_VALUE,
+    REDMINE_MESSAGEID_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_VALUE,
     REDMINE_ESTIMATED_HOURS,
@@ -17,6 +20,7 @@ from backend.config.settings import (
     REDMINE_END_DATE,
 )
 from backend.utils.logger import get_logger
+from backend.utils.retry import RedmineUploadError
 
 logger = get_logger("redmine")
 
@@ -81,16 +85,26 @@ class RedmineClient:
         response.raise_for_status()
         return response.json()
 
-    def create_issue(
-        self,
+    @staticmethod
+    def _message_marker(message_id: str) -> str:
+        safe_id = "".join(
+            character for character in message_id
+            if character.isalnum() or character in "-_"
+        )
+        if not safe_id:
+            raise ValueError("A valid Gmail message ID is required")
+        return f"<!-- gmail-message-id: {safe_id} -->"
+
+    @staticmethod
+    def build_issue_payload(
         project_id,
         subject,
         description,
+        message_id=None,
     ):
-        """
-        Create a new Support issue in Redmine.
-        """
-        url = f"{self.base_url}/issues.json"
+        if message_id:
+            marker = RedmineClient._message_marker(str(message_id))
+            description = f"{description.rstrip()}\n\n{marker}".strip()
 
         start_date = (
             date.today().isoformat()
@@ -115,11 +129,9 @@ class RedmineClient:
             "due_date": end_date,
         }
 
-        # Add built-in category if configured
         if REDMINE_ISSUES_CATEGORY:
             issue["category_id"] = REDMINE_ISSUES_CATEGORY
 
-        # Add custom fields
         custom_fields = []
         if REDMINE_CATEGORY_CUSTOM_FIELD_ID and REDMINE_CATEGORY_VALUE:
             custom_fields.append({
@@ -131,13 +143,34 @@ class RedmineClient:
                 "id": REDMINE_SEVERITY_CUSTOM_FIELD_ID,
                 "value": REDMINE_SEVERITY_VALUE,
             })
-
+        if message_id and REDMINE_MESSAGEID_CUSTOM_FIELD_ID:
+            custom_fields.append({
+                "id": REDMINE_MESSAGEID_CUSTOM_FIELD_ID,
+                "value": str(message_id),
+            })
         if custom_fields:
             issue["custom_fields"] = custom_fields
 
-        payload = {
-            "issue": issue
-        }
+        return {"issue": issue}
+
+    def create_issue(
+        self,
+        project_id,
+        subject,
+        description,
+        message_id=None,
+    ):
+        """
+        Create a new Support issue in Redmine.
+        """
+        url = f"{self.base_url}/issues.json"
+
+        payload = self.build_issue_payload(
+            project_id,
+            subject,
+            description,
+            message_id,
+        )
 
         if self.dry_run:
             logger.info(f"[DRY-RUN] Would create issue with payload: {self._redact_api_key(str(payload))}")
@@ -145,18 +178,93 @@ class RedmineClient:
             self._fake_issue_counter += 1
             return {"issue": {"id": fake_issue_id, "subject": subject}}
 
-        response = requests.post(
-            url,
-            headers=self.headers,
-            json=payload,
-            timeout=10,
-        )
+        try:
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json=payload,
+                timeout=10,
+            )
+        except requests.Timeout as timeout_error:
+            if message_id:
+                try:
+                    issue_id = self.find_issue_by_message_id(str(message_id))
+                except Exception as lookup_error:
+                    logger.error(
+                        "Could not verify timed-out Redmine create for Gmail message %s: %s",
+                        message_id,
+                        lookup_error,
+                    )
+                else:
+                    if issue_id:
+                        return {
+                            "issue": {
+                                "id": issue_id,
+                                "subject": subject,
+                            }
+                        }
+            raise timeout_error
 
         if not response.ok:
-            logger.error(f"Redmine create issue failed (HTTP {response.status_code}): {response.text}")
+            logger.error(
+                f"Redmine create issue failed (HTTP {response.status_code}): "
+                f"{self._redact_api_key(response.text[:200])}"
+            )
             response.raise_for_status()
 
         return response.json()
+
+    def find_issue_by_message_id(self, message_id: str) -> Optional[int]:
+        marker = self._message_marker(message_id)
+        offset = 0
+        limit = 100
+
+        while True:
+            response = requests.get(
+                f"{self.base_url}/issues.json",
+                headers=self.headers,
+                params={
+                    "project_id": REDMINE_PROJECT_ID,
+                    "status_id": "*",
+                    "limit": limit,
+                    "offset": offset,
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+            for issue in data.get("issues", []):
+                if marker in (issue.get("description") or ""):
+                    return issue.get("id")
+
+            offset += len(data.get("issues", []))
+            total_count = data.get("total_count")
+            if (
+                not data.get("issues")
+                or (total_count is not None and offset >= total_count)
+                or len(data.get("issues", [])) < limit
+            ):
+                return None
+
+    def get_issue(self, issue_id, include=None):
+        response = requests.get(
+            f"{self.base_url}/issues/{issue_id}.json",
+            headers=self.headers,
+            params={"include": include} if include else None,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json().get("issue", {})
+
+    def update_issue_description(self, issue_id, description):
+        response = requests.put(
+            f"{self.base_url}/issues/{issue_id}.json",
+            headers=self.headers,
+            json={"issue": {"description": description}},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json() if response.text.strip() else None
 
     def upload_attachment(self, file_path):
         """
@@ -178,10 +286,9 @@ class RedmineClient:
 
         if not response.ok:
             logger.error(f"Redmine upload failed (HTTP {response.status_code}): {response.text[:200]}")
-            # Check for 413/422 errors (file too large)
             if response.status_code in (413, 422):
-                from backend.utils.retry import RedmineUploadError
-                raise RedmineUploadError(response.status_code, response.text[:200])
+                body = self._redact_api_key(response.text[:200])
+                raise RedmineUploadError(response.status_code, body)
             response.raise_for_status()
 
         return response.json()["upload"]["token"]
