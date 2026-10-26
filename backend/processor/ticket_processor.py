@@ -517,7 +517,11 @@ class TicketProcessor:
         safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", message_id)
         attachment_dir = EMAIL_ATTACHMENTS_DIR / "pending" / safe_id
         uploaded_names = set(record.get("uploaded_attachment_names", []))
-        attachment_handling = list(record.get("attachment_handling", []))
+        attachment_handling = [
+            line
+            for line in record.get("attachment_handling", [])
+            if line != "No files were compressed or skipped."
+        ]
         preserve_paths = set()
 
         try:
@@ -656,16 +660,14 @@ class TicketProcessor:
                         updated_description,
                     )
 
-                if not attachment_handling:
-                    attachment_handling.append("No files were compressed or skipped.")
                 self.processed_store.update(
                     message_id,
                     attachments_processed=True,
                     attachment_handling=attachment_handling,
                 )
 
-            handling_note = "Attachment handling:\n" + "\n".join(attachment_handling)
-            if not record.get("handling_note_written"):
+            if attachment_handling and not record.get("handling_note_written"):
+                handling_note = "Attachment handling:\n" + "\n".join(attachment_handling)
                 try:
                     self.redmine.add_issue_note(issue_id, handling_note)
                 except Exception as note_error:

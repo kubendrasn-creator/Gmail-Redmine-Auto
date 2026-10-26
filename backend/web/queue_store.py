@@ -85,17 +85,34 @@ class PendingItemStore:
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT id, payload_json FROM pending_items "
-                "WHERE status IN ('PENDING', 'WAITING_FOR_USER', 'SUPERSEDED')"
+                "WHERE status IN ('PENDING', 'WAITING_FOR_USER')"
             ).fetchall()
             for row in rows:
                 payload = json.loads(row["payload_json"])
                 payload["status"] = "FAILED"
                 payload["error"] = (
-                    "This email was not approved or created. Its review was "
-                    "interrupted when the app closed. Retry to reopen it."
+                    "Review was interrupted before a decision was recorded. "
+                    "No approval or ticket creation was recorded. Retry to reopen it."
                 )
                 connection.execute(
                     "UPDATE pending_items SET payload_json = ?, status = 'FAILED', "
+                    "updated_at = ? WHERE id = ?",
+                    (json.dumps(payload, ensure_ascii=False), now, row["id"]),
+                )
+            legacy_rows = connection.execute(
+                "SELECT id, payload_json FROM pending_items WHERE status = 'SUPERSEDED'"
+            ).fetchall()
+            for row in legacy_rows:
+                payload = json.loads(row["payload_json"])
+                payload["status"] = "APPROVED"
+                payload["error"] = (
+                    "This legacy queue item was closed during a previous app "
+                    "restart. Its status has been renamed from Superseded to "
+                    "Approved for queue display; this does not mean a Redmine "
+                    "ticket was created."
+                )
+                connection.execute(
+                    "UPDATE pending_items SET payload_json = ?, status = 'APPROVED', "
                     "updated_at = ? WHERE id = ?",
                     (json.dumps(payload, ensure_ascii=False), now, row["id"]),
                 )

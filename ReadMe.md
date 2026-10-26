@@ -150,8 +150,13 @@ generated PDFs.
 
 If the app closes while an email is awaiting review, that item is marked **FAILED**
 with a message explaining that no approval or ticket creation occurred. Use **Retry**
-to reopen the message for a fresh review. This replaces the previous misleading
-`SUPERSEDED` status.
+to reopen the message for a fresh review. Older queue records labeled
+`SUPERSEDED` are relabeled **APPROVED** for queue display; this is not a claim that
+a Redmine ticket was created.
+
+Attachment-handling notes are added to Redmine only when an attachment was skipped
+or compressed. No note is added when attachments required no special handling or
+when the email had no attachments.
 
 ## Gmail Setup Requirements
 
