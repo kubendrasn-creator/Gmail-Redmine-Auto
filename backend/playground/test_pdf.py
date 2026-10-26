@@ -2,10 +2,9 @@ from backend.gmail.gmail_client import GmailClient
 from backend.gmail.email_parser import EmailParser
 from backend.gmail.email_pdf_generator import EmailPdfGenerator
 from backend.ticketing.ticket_classifier import TicketClassifier
-
-
 import re
-from pathlib import Path
+
+from backend.config.settings import GENERATED_EMAILS_DIR
 
 def create_safe_filename(subject):
     filename = re.sub(r'[<>:"/\\|?*]', "_", subject)
@@ -44,14 +43,13 @@ def main():
 
         print("Support ticket detected.")
 
-        output_dir = Path("generated_emails")
-        output_dir.mkdir(exist_ok=True)
+        GENERATED_EMAILS_DIR.mkdir(parents=True, exist_ok=True)
 
         filename = create_safe_filename(
             email["subject"]
         )
 
-        output_path = str(output_dir / filename)
+        output_path = str(GENERATED_EMAILS_DIR / filename)
 
         pdf_generator.generate(
             email,

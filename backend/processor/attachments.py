@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from backend.config.settings import (
-    ATTACHMENTS_DIR,
+    EMAIL_ATTACHMENTS_DIR,
     REDMINE_MAX_ATTACHMENT_MB,
     VIDEO_COMPRESSION_ENABLED,
 )

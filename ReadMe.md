@@ -180,9 +180,9 @@ Gmail-Redmine/
 ├── data/
 │   ├── database/
 │   └── logs/
-├── attachments/          (Original attachment storage)
-├── generated_emails/
-└── email_attachments/
+├── email_data/
+│   ├── email_attachments/ (Temporary downloaded email attachments; cleaned after upload)
+│   └── generated_emails/  (Generated email PDFs; cleaned after upload)
 ```
 
 ## Important Notes

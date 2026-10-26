@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from backend.config.settings import (
-    ATTACHMENTS_DIR,
     DATABASE_DIR,
+    EMAIL_ATTACHMENTS_DIR,
     GEMINI_API_KEY,
+    GENERATED_EMAILS_DIR,
     REDMINE_API_KEY,
     REDMINE_ASSIGNEE_ID,
     REDMINE_CATEGORY_CUSTOM_FIELD_ID,
@@ -343,7 +344,8 @@ class PreflightValidator:
         issues = []
 
         dirs_to_check = [
-            ATTACHMENTS_DIR,
+            EMAIL_ATTACHMENTS_DIR,
+            GENERATED_EMAILS_DIR,
             DATABASE_DIR,
         ]
 

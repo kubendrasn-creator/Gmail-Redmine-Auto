@@ -18,10 +18,8 @@ env/*
 # Logs & Temporary processing directories
 data/logs/*
 !data/logs/.gitkeep
-generated_emails/*
-!generated_emails/.gitkeep
-email_attachments/*
-!email_attachments/.gitkeep
-temp_attachments/*
-!temp_attachments/.gitkeep
+email_data/generated_emails/*
+!email_data/generated_emails/.gitkeep
+email_data/email_attachments/*
+!email_data/email_attachments/.gitkeep
 *.pdf

@@ -56,7 +56,6 @@ THREAD_RETENTION_DAYS = int(os.getenv("THREAD_RETENTION_DAYS", "180"))
 
 # Attachment configuration
 REDMINE_MAX_ATTACHMENT_MB = int(os.getenv("REDMINE_MAX_ATTACHMENT_MB", "10"))
-ATTACHMENTS_DIR = BASE_DIR / "email_attachments"
 VIDEO_COMPRESSION_ENABLED = os.getenv("VIDEO_COMPRESSION_ENABLED", "true").lower() == "true"
 
 # AI configuration
@@ -74,8 +73,9 @@ RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "4"))
 
 # Paths and directories
 LOG_FILE_PATH = BASE_DIR / "data" / "logs" / "gmail_redmine.log"
-GENERATED_EMAILS_DIR = BASE_DIR / "generated_emails"
-EMAIL_ATTACHMENTS_DIR = BASE_DIR / "email_attachments"
+EMAIL_DATA_DIR = BASE_DIR / "email_data"
+GENERATED_EMAILS_DIR = EMAIL_DATA_DIR / "generated_emails"
+EMAIL_ATTACHMENTS_DIR = EMAIL_DATA_DIR / "email_attachments"
 DATABASE_DIR = BASE_DIR / "data" / "database"
 
 
