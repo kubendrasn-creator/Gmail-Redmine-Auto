@@ -162,6 +162,9 @@
       ["Suggested action", item.suggested_action],
       ["Category", classification.category || item.category || "—"],
       ["Confidence", typeof classification.confidence === "number" ? `${Math.round(classification.confidence * 100)}%` : "—"],
+      ["Gemini tokens", classification.token_usage
+        ? `Input ${formatCount(classification.token_usage.input_tokens)} · Output/completion ${formatCount(classification.token_usage.output_tokens)} · Thinking ${formatCount(classification.token_usage.thinking_tokens)} · Tool input ${formatCount(classification.token_usage.tool_input_tokens)} · Total ${formatCount(classification.token_usage.total_tokens)}`
+        : "Not reported for this message"],
       ["Missing fields", (classification.missing_fields || []).join(", ") || "None"],
       ["Attachment-dependent", classification.attachment_dependent ? "Yes" : "No"],
       ["Reasoning", classification.reasoning || "Not available"],
@@ -430,7 +433,30 @@
       `compressed ${summary.attachments_compressed || 0}`,
       `attachments skipped ${summary.attachments_skipped || 0}`,
     ];
+    if (summary.token_usage) {
+      details.push(
+        `tokens this run: input ${formatCount(summary.token_usage.input_tokens)}, ` +
+        `output/completion ${formatCount(summary.token_usage.output_tokens)}, ` +
+        `thinking ${formatCount(summary.token_usage.thinking_tokens)}, ` +
+        `tool input ${formatCount(summary.token_usage.tool_input_tokens)}, ` +
+        `total ${formatCount(summary.token_usage.total_tokens)}`
+      );
+    }
     elements.summary.append(node("span", details.join(" · ")));
+  }
+
+  function formatCount(value) {
+    return Number(value || 0).toLocaleString();
+  }
+
+  function renderTokenUsage(usage = {}) {
+    $("#token-usage").textContent = [
+      `Input ${formatCount(usage.input_tokens)}`,
+      `Output/completion ${formatCount(usage.output_tokens)}`,
+      `Thinking ${formatCount(usage.thinking_tokens)}`,
+      `Tool input ${formatCount(usage.tool_input_tokens)}`,
+      `Total ${formatCount(usage.total_tokens)}`,
+    ].join(" · ");
   }
 
   let runDefaultsLoaded = false;
@@ -446,6 +472,7 @@
     $("#ffmpeg-status").textContent = `FFmpeg: ${data.ffmpeg ? "yes" : "no"}`;
     $("#attachment-limit").textContent = `Attachment limit: ${data.attachment_limit_mb} MB`;
     $("#counts").textContent = `Pending ${data.counts.pending} · Created ${data.counts.created} · Rejected ${data.counts.rejected}`;
+    renderTokenUsage(data.token_usage);
     renderPreflight(data.checks);
   }
 
@@ -504,6 +531,7 @@
           itemDetails.set(item.id, item);
           items.set(item.id, item);
           renderQueue();
+          if (selectedId === item.id) showItem(item.id);
         } catch (error) {
           showError(error);
         }
@@ -521,6 +549,9 @@
   stream.addEventListener("run_summary", (event) => {
     renderSummary(JSON.parse(event.data));
     loadStatus().catch(showError);
+  });
+  stream.addEventListener("token_usage", (event) => {
+    renderTokenUsage(JSON.parse(event.data));
   });
   stream.addEventListener("log", (event) => {
     const data = JSON.parse(event.data);

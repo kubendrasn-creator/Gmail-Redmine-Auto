@@ -67,6 +67,7 @@ ALLOWED_MODULES = [
 REDMINE_MESSAGEID_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_MESSAGEID_CUSTOM_FIELD_ID") or 0)
 WEB_PORT = int(os.getenv("WEB_PORT", "8000"))
 WEB_AUTO_OPEN_BROWSER = os.getenv("WEB_AUTO_OPEN_BROWSER", "true").lower() == "true"
+APP_MODE = os.getenv("APP_MODE", "ui").strip().lower()
 
 # Retry configuration
 RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "4"))
@@ -86,6 +87,9 @@ def validate_settings():
     """
 
     missing = []
+
+    if APP_MODE not in {"ui", "terminal"}:
+        raise RuntimeError("APP_MODE must be either 'ui' or 'terminal'")
 
     if not REDMINE_URL:
         missing.append("REDMINE_URL")

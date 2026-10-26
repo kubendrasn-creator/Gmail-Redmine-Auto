@@ -81,6 +81,17 @@ This starts the local review UI and opens it in your browser. Use **Fetch emails
 load the review queue; emails are not fetched automatically unless `--auto-run` is
 passed.
 
+Choose the default interface in `env/.env`:
+
+```env
+APP_MODE=ui
+```
+
+Set `APP_MODE=terminal` to use the original terminal prompts instead. The setting
+accepts only `ui` or `terminal` (case-insensitive). A command-line `--mode ui` or
+`--mode terminal` overrides it for one run; legacy `--no-ui` also selects terminal
+mode. Restart the app after changing `env/.env`.
+
 Useful options:
 
 ```bash
@@ -103,6 +114,15 @@ python -m backend.main --dry-run
 Existing options `--skip-preflight`, `--lookback-hours`, and `--max-results` are
 also available. Use `WEB_PORT` and `WEB_AUTO_OPEN_BROWSER` in `env/.env` to set
 the default UI port and browser behavior.
+
+#### Gemini token usage
+
+The UI reports provider-returned Gemini input, output/completion, thinking, tool
+input, and total tokens for the current app session, plus totals for the latest
+processing run. Each reviewed email also shows its classification token counts.
+These are Gemini API usage metadata, not an estimate or a dollar-cost calculation.
+Counters restart when the application is restarted. Rule-based fallback
+classifications have no Gemini token usage to report.
 
 #### Local UI security
 

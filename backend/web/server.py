@@ -144,12 +144,14 @@ def _run_cycle(state: AppState, dry_run: bool, message_ids=None):
         "attachments_compressed": 0,
         "attachments_skipped": 0,
     }
+    token_usage_before = state.token_usage_snapshot()
     try:
         prune_expired_attachments()
         _set_run_state(state, "FETCHING")
         processor = TicketProcessor(
             dry_run=dry_run,
             confirmer=WebConfirmer(state, dry_run=dry_run),
+            token_usage_callback=state.add_token_usage,
         )
         gmail = processor.gmail
         messages = (
@@ -242,6 +244,11 @@ def _run_cycle(state: AppState, dry_run: bool, message_ids=None):
         summary["error"] = _safe_text(exc)
         summary["failed"] += 1
     finally:
+        token_usage_after = state.token_usage_snapshot()
+        summary["token_usage"] = {
+            key: token_usage_after[key] - token_usage_before[key]
+            for key in token_usage_before
+        }
         with state.lock:
             state.is_running = False
             state.run_summary = summary
@@ -363,6 +370,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 "dry_run_default": state.default_dry_run,
                 "counts": counts,
                 "running": state.is_running,
+                "token_usage": state.token_usage_snapshot(),
             }
 
     @app.post("/api/run", status_code=202)

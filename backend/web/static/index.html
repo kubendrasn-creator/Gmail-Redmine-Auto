@@ -28,6 +28,10 @@
     <span id="ffmpeg-status">FFmpeg: checking</span>
     <span id="attachment-limit">Attachment limit: —</span>
     <span id="counts">Pending 0 · Created 0 · Rejected 0</span>
+    <div class="token-usage" aria-live="polite">
+      <strong>Gemini tokens · this session</strong>
+      <span id="token-usage">Input 0 · Output/completion 0 · Thinking 0 · Tool input 0 · Total 0</span>
+    </div>
   </section>
   <section id="preflight-panel" class="preflight-panel" hidden>
     <h2>Preflight checks</h2>
@@ -50,9 +54,11 @@
             <option>PENDING</option>
             <option>CREATED</option>
             <option>ATTACHED</option>
+            <option>PREVIEWED</option>
             <option>REJECTED</option>
             <option>SKIPPED</option>
             <option>FAILED</option>
+            <option>SUPERSEDED</option>
           </select>
         </label>
         <label>Action

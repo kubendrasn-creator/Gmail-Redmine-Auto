@@ -32,6 +32,13 @@ class AppState:
         self.is_running = False
         self.shutdown_requested = False
         self.run_summary = {}
+        self.token_usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "tool_input_tokens": 0,
+            "total_tokens": 0,
+        }
         self.items = {}
         self.futures = {}
         self.subscribers = set()
@@ -62,6 +69,17 @@ class AppState:
             if loop.is_closed():
                 continue
             loop.call_soon_threadsafe(self._put_event, queue, event)
+
+    def add_token_usage(self, usage):
+        with self.lock:
+            for key in self.token_usage:
+                self.token_usage[key] += max(0, int(usage.get(key, 0) or 0))
+            totals = dict(self.token_usage)
+        self.publish("token_usage", totals)
+
+    def token_usage_snapshot(self):
+        with self.lock:
+            return dict(self.token_usage)
 
     @staticmethod
     def _put_event(queue, event):

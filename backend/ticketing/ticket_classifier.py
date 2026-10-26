@@ -1,5 +1,5 @@
 import hashlib
-from typing import Optional, Literal
+from typing import Callable, Optional, Literal
 
 from google import genai
 from google.genai import types
@@ -115,10 +115,14 @@ class TicketClassifier:
     Determines whether an email should become a Redmine Support ticket.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        usage_callback: Callable[[dict[str, int]], None] | None = None,
+    ):
         if not GEMINI_API_KEY:
             logger.warning("GEMINI_API_KEY not set. AI classification will fail gracefully.")
         self.client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+        self.usage_callback = usage_callback
 
     def classify(self, email):
         """
@@ -154,6 +158,7 @@ EMAIL BODY:
 """
 
         prompt_hash = hashlib.sha256(CLASSIFICATION_SYSTEM_PROMPT.encode()).hexdigest()[:8]
+        token_usage = None
 
         try:
             import time
@@ -169,6 +174,20 @@ EMAIL BODY:
                     temperature=0.1,
                 ),
             )
+
+            token_usage = self._extract_token_usage(response)
+            if token_usage is not None:
+                if self.usage_callback:
+                    self.usage_callback(token_usage)
+                logger.info(
+                    "Gemini token usage: input=%s output=%s thinking=%s "
+                    "tool_input=%s total=%s",
+                    token_usage["input_tokens"],
+                    token_usage["output_tokens"],
+                    token_usage["thinking_tokens"],
+                    token_usage["tool_input_tokens"],
+                    token_usage["total_tokens"],
+                )
 
             latency = time.time() - start_time
             result = EmailClassificationResult.model_validate_json(response.text)
@@ -215,12 +234,52 @@ EMAIL BODY:
                 "missing_fields": result.missing_fields,
                 "attachment_dependent": result.attachment_dependent,
                 "confidence": result.confidence,
+                "token_usage": token_usage,
             }
 
         except Exception as e:
             logger.error(f"Gemini classification failed: {e}", exc_info=True)
             logger.info("Falling back to rule-based classification.")
-            return self._fallback_classification(email)
+            fallback = self._fallback_classification(email)
+            if token_usage is not None:
+                fallback["token_usage"] = token_usage
+            return fallback
+
+    @staticmethod
+    def _extract_token_usage(response) -> dict[str, int] | None:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None:
+            return None
+
+        def read_count(name):
+            if isinstance(usage, dict):
+                value = usage.get(name)
+                if value is None:
+                    camel_name = "".join(
+                        part.title() if index else part
+                        for index, part in enumerate(name.split("_"))
+                    )
+                    value = usage.get(camel_name)
+            else:
+                value = getattr(usage, name, None)
+            return max(0, int(value or 0))
+
+        input_tokens = read_count("prompt_token_count")
+        output_tokens = read_count("candidates_token_count")
+        thinking_tokens = read_count("thoughts_token_count")
+        tool_input_tokens = read_count("tool_use_prompt_token_count")
+        total_tokens = read_count("total_token_count")
+        if total_tokens == 0:
+            total_tokens = (
+                input_tokens + output_tokens + thinking_tokens + tool_input_tokens
+            )
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "thinking_tokens": thinking_tokens,
+            "tool_input_tokens": tool_input_tokens,
+            "total_tokens": total_tokens,
+        }
 
     def _fallback_classification(self, email):
         """

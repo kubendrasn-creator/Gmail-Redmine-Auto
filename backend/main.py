@@ -5,6 +5,7 @@ from backend.config.settings import (
     GMAIL_ALLOWED_SENDERS,
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
+    APP_MODE,
     WEB_PORT,
     validate_settings,
 )
@@ -50,6 +51,12 @@ def main():
         help="Override Gmail max results from config",
     )
     parser.add_argument(
+        "--mode",
+        choices=("ui", "terminal"),
+        default=None,
+        help="Override APP_MODE from env/.env",
+    )
+    parser.add_argument(
         "--no-ui",
         action="store_true",
         help="Use the existing terminal workflow instead of the local review UI",
@@ -75,6 +82,7 @@ def main():
     # Override config if flags provided
     lookback_hours = args.lookback_hours if args.lookback_hours is not None else GMAIL_LOOKBACK_HOURS
     max_results = args.max_results if args.max_results is not None else GMAIL_MAX_RESULTS
+    app_mode = "terminal" if args.no_ui else (args.mode or APP_MODE)
 
     # Run preflight unless skipped
     if not args.skip_preflight:
@@ -93,7 +101,7 @@ def main():
         print(f"Configuration Error: {exc}")
         sys.exit(1)
 
-    if not args.no_ui:
+    if app_mode == "ui":
         from backend.web.server import run_server
 
         run_server(

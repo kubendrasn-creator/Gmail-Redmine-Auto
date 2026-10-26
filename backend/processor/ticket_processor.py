@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+from typing import Callable
 
 import requests
 
@@ -44,10 +45,15 @@ class TicketProcessor:
         - Two-phase persistence ensures Redmine ticket IDs are never lost even if PDF/attachments fail.
     """
 
-    def __init__(self, dry_run: bool = False, confirmer: Confirmer | None = None):
+    def __init__(
+        self,
+        dry_run: bool = False,
+        confirmer: Confirmer | None = None,
+        token_usage_callback: Callable[[dict[str, int]], None] | None = None,
+    ):
         self.gmail = GmailClient()
         self.parser = EmailParser()
-        self.classifier = TicketClassifier()
+        self.classifier = TicketClassifier(usage_callback=token_usage_callback)
         self.pdf_generator = EmailPdfGenerator()
         self.redmine = RedmineClient(dry_run=dry_run)
         self.processed_store = ProcessedMessageStore()
