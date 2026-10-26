@@ -25,7 +25,6 @@ REDMINE_CATEGORY_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_CATEGORY_CUSTOM_FIELD_
 REDMINE_CATEGORY_VALUE = os.getenv("REDMINE_CATEGORY_VALUE")
 
 REDMINE_ISSUES_CATEGORY = int(os.getenv("REDMINE_ISSUES_CATEGORY") or 0)
-REDMINE_ISSUES_CATEGORY_VALUE = os.getenv("REDMINE_ISSUES_CATEGORY_VALUE")
 
 REDMINE_SEVERITY_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_SEVERITY_CUSTOM_FIELD_ID") or 0)
 REDMINE_SEVERITY_VALUE = os.getenv("REDMINE_SEVERITY_VALUE")
@@ -65,8 +64,10 @@ ALLOWED_MODULES = [
     for m in os.getenv("ALLOWED_MODULES", "").split(",")
     if m.strip()
 ]
-REDMINE_TEXT_FORMAT = os.getenv("REDMINE_TEXT_FORMAT", "textile")
 REDMINE_MESSAGEID_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_MESSAGEID_CUSTOM_FIELD_ID") or 0)
+WEB_PORT = int(os.getenv("WEB_PORT", "8000"))
+WEB_AUTO_OPEN_BROWSER = os.getenv("WEB_AUTO_OPEN_BROWSER", "true").lower() == "true"
+APP_MODE = os.getenv("APP_MODE", "ui").strip().lower()
 
 # Retry configuration
 RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "4"))
@@ -76,6 +77,7 @@ LOG_FILE_PATH = BASE_DIR / "data" / "logs" / "gmail_redmine.log"
 EMAIL_DATA_DIR = BASE_DIR / "email_data"
 GENERATED_EMAILS_DIR = EMAIL_DATA_DIR / "generated_emails"
 EMAIL_ATTACHMENTS_DIR = EMAIL_DATA_DIR / "email_attachments"
+ATTACHMENTS_DIR = EMAIL_ATTACHMENTS_DIR
 DATABASE_DIR = BASE_DIR / "data" / "database"
 
 
@@ -85,6 +87,9 @@ def validate_settings():
     """
 
     missing = []
+
+    if APP_MODE not in {"ui", "terminal"}:
+        raise RuntimeError("APP_MODE must be either 'ui' or 'terminal'")
 
     if not REDMINE_URL:
         missing.append("REDMINE_URL")

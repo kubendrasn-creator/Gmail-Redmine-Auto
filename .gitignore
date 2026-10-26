@@ -18,6 +18,8 @@ env/*
 # Logs & Temporary processing directories
 data/logs/*
 !data/logs/.gitkeep
+data/database/*.sqlite3
+data/database/*.sqlite3-*
 email_data/generated_emails/*
 !email_data/generated_emails/.gitkeep
 email_data/email_attachments/*

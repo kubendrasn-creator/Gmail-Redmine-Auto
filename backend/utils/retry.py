@@ -3,9 +3,8 @@ Retry and backoff handling for external service calls.
 
 Uses tenacity for exponential backoff with jitter.
 """
-import time
 from functools import wraps
-from typing import Callable, Type
+from typing import Callable, Optional
 
 import requests
 from tenacity import (
@@ -130,12 +129,7 @@ class IdempotentRetry:
         Returns issue ID if found, None otherwise.
         """
         try:
-            # Search issues for the hidden marker
-            search_query = f"<!-- gmail-message-id: {message_id} -->"
-            # Note: This requires Redmine to support searching in issue descriptions
-            # If not available, we may need to use a custom field instead
-            logger.warning("Message ID search not implemented - using custom field instead")
-            return None
+            return self.redmine_client.find_issue_by_message_id(message_id)
         except Exception as e:
             logger.error(f"Failed to search for issue by message ID: {e}")
-            return None
+            raise
