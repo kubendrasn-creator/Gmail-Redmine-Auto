@@ -3,9 +3,12 @@ import sys
 
 from backend.config.settings import (
     GMAIL_ALLOWED_SENDERS,
+    GMAIL_LOOKBACK_HOURS,
+    GMAIL_MAX_RESULTS,
     validate_settings,
 )
 from backend.gmail.gmail_client import GmailClient
+from backend.utils.preflight import PreflightValidator
 from backend.processor.ticket_processor import TicketProcessor
 from backend.storage.message_fingerprint import create_content_fingerprint
 from backend.storage.processed_messages import ProcessedMessageStore
@@ -24,17 +27,53 @@ def main():
         default=None,
         help="Process a specific Gmail message ID directly",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run in dry-run mode (no writes to Redmine or database)",
+    )
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip preflight validation checks",
+    )
+    parser.add_argument(
+        "--lookback-hours",
+        type=int,
+        default=None,
+        help="Override Gmail lookback hours from config",
+    )
+    parser.add_argument(
+        "--max-results",
+        type=int,
+        default=None,
+        help="Override Gmail max results from config",
+    )
     args = parser.parse_args()
+
+    # Override config if flags provided
+    lookback_hours = args.lookback_hours if args.lookback_hours is not None else GMAIL_LOOKBACK_HOURS
+    max_results = args.max_results if args.max_results is not None else GMAIL_MAX_RESULTS
+
+    # Run preflight unless skipped
+    if not args.skip_preflight:
+        validator = PreflightValidator()
+        checks = validator.run_all()
+        validator.print_report()
+        has_failures = any(c.status.name == "FAIL" for c in checks)
+        if has_failures:
+            print("Preflight validation failed. Aborting.")
+            sys.exit(1)
 
     try:
         validate_settings()
     except Exception as exc:
         logger.error(f"Configuration validation failed: {exc}")
         print(f"Configuration Error: {exc}")
-        return
+        sys.exit(1)
 
     gmail = GmailClient()
-    processor = TicketProcessor()
+    processor = TicketProcessor(dry_run=args.dry_run)
     store = ProcessedMessageStore()
 
     if args.message_id:
@@ -61,6 +100,9 @@ def main():
         "skipped_by_user": 0,
         "already_processed": 0,
         "failed": 0,
+        "ai_fallback": 0,
+        "attachments_compressed": 0,
+        "attachments_skipped": 0,
     }
 
     for message in messages:
@@ -115,20 +157,21 @@ def main():
             logger.warning(
                 f"Sender '{sender_email}' is not in approved senders list. Recording and skipping."
             )
-            store.add(
-                message_id=message_id,
-                thread_id=thread_id,
-                rfc_message_id=rfc_message_id,
-                in_reply_to=in_reply_to,
-                references=references,
-                direct_sender=sender_email,
-                original_sender=email.get("original_sender"),
-                original_subject=email.get("original_subject"),
-                original_date=email.get("original_date"),
-                subject=subject,
-                ticket_type=None,
-                status="sender_not_allowed",
-            )
+            if not args.dry_run:
+                store.add(
+                    message_id=message_id,
+                    thread_id=thread_id,
+                    rfc_message_id=rfc_message_id,
+                    in_reply_to=in_reply_to,
+                    references=references,
+                    direct_sender=sender_email,
+                    original_sender=email.get("original_sender"),
+                    original_subject=email.get("original_subject"),
+                    original_date=email.get("original_date"),
+                    subject=subject,
+                    ticket_type=None,
+                    status="sender_not_allowed",
+                )
             stats["sender_not_allowed"] += 1
             continue
 
@@ -139,7 +182,7 @@ def main():
             result = processor.process_message(
                 message_id,
                 email=email,
-                interactive=True,
+                interactive=not args.dry_run,
             )
         except Exception as exc:
             logger.error(f"Error processing message {message_id}: {exc}", exc_info=True)
@@ -186,6 +229,9 @@ def main():
     logger.info(f"  Skipped by user:        {stats['skipped_by_user']}")
     logger.info(f"  Already processed:      {stats['already_processed']}")
     logger.info(f"  Failed:                 {stats['failed']}")
+    logger.info(f"  AI fallback:            {stats['ai_fallback']}")
+    logger.info(f"  Attachments compressed: {stats['attachments_compressed']}")
+    logger.info(f"  Attachments skipped:    {stats['attachments_skipped']}")
     logger.info("=" * 50)
 
 

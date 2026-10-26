@@ -14,6 +14,8 @@ from backend.config.settings import (
 )
 from backend.utils.logger import get_logger
 from backend.utils.prompt import ask_yes_no
+from backend.processor.attachments import AttachmentPipeline
+from backend.utils.links import LinkDetector
 
 logger = get_logger("processor")
 
@@ -28,13 +30,14 @@ class TicketProcessor:
         - Two-phase persistence ensures Redmine ticket IDs are never lost even if PDF/attachments fail.
     """
 
-    def __init__(self):
+    def __init__(self, dry_run: bool = False):
         self.gmail = GmailClient()
         self.parser = EmailParser()
         self.classifier = TicketClassifier()
         self.pdf_generator = EmailPdfGenerator()
-        self.redmine = RedmineClient()
+        self.redmine = RedmineClient(dry_run=dry_run)
         self.processed_store = ProcessedMessageStore()
+        self.dry_run = dry_run
 
     def process_message(self, message_id, email=None, interactive=True):
         """

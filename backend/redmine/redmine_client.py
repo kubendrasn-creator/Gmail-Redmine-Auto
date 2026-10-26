@@ -26,13 +26,21 @@ class RedmineClient:
     Handles communication with the Redmine REST API.
     """
 
-    def __init__(self):
+    def __init__(self, dry_run: bool = False):
         self.base_url = REDMINE_URL.rstrip("/")
+        self.dry_run = dry_run
 
         self.headers = {
             "X-Redmine-API-Key": REDMINE_API_KEY,
             "Content-Type": "application/json",
         }
+        self._fake_issue_counter = 1000
+
+    def _redact_api_key(self, text: str) -> str:
+        """Redact API key from text for logging."""
+        if REDMINE_API_KEY:
+            return text.replace(REDMINE_API_KEY, "***REDACTED***")
+        return text
 
     def get_projects(self):
         """
@@ -131,6 +139,12 @@ class RedmineClient:
             "issue": issue
         }
 
+        if self.dry_run:
+            logger.info(f"[DRY-RUN] Would create issue with payload: {self._redact_api_key(str(payload))}")
+            fake_issue_id = self._fake_issue_counter
+            self._fake_issue_counter += 1
+            return {"issue": {"id": fake_issue_id, "subject": subject}}
+
         response = requests.post(
             url,
             headers=self.headers,
@@ -147,6 +161,7 @@ class RedmineClient:
     def upload_attachment(self, file_path):
         """
         Upload a file to Redmine and return the upload token.
+        Streams the file from disk to handle large files.
         """
         url = f"{self.base_url}/uploads.json"
 
@@ -158,11 +173,15 @@ class RedmineClient:
                     "Content-Type": "application/octet-stream",
                 },
                 data=file,
-                timeout=30,
+                timeout=(10, 300),  # (connect timeout, read timeout)
             )
 
         if not response.ok:
-            logger.error(f"Redmine upload failed (HTTP {response.status_code}): {response.text}")
+            logger.error(f"Redmine upload failed (HTTP {response.status_code}): {response.text[:200]}")
+            # Check for 413/422 errors (file too large)
+            if response.status_code in (413, 422):
+                from backend.utils.retry import RedmineUploadError
+                raise RedmineUploadError(response.status_code, response.text[:200])
             response.raise_for_status()
 
         return response.json()["upload"]["token"]

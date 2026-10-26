@@ -1,10 +1,16 @@
-from typing import Optional
+import hashlib
+from typing import Optional, Literal
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from backend.config.settings import GEMINI_API_KEY
+from backend.config.settings import (
+    AI_MAX_INPUT_CHARS,
+    ALLOWED_MODULES,
+    GEMINI_API_KEY,
+    REDMINE_TEXT_FORMAT,
+)
 from backend.utils.logger import get_logger
 
 logger = get_logger("classifier")
@@ -19,9 +25,12 @@ class EmailClassificationResult(BaseModel):
             " technical/operational action, False otherwise."
         )
     )
-    ticket_type: Optional[str] = Field(
-        default="Support",
-        description="Category of ticket (e.g. 'Support', 'Bug', 'Access Request').",
+    category: Literal["issue", "question", "noise", "followup"] = Field(
+        description="Classification category: issue, question, noise, or followup",
+    )
+    issue_evidence: Optional[str] = Field(
+        default=None,
+        description="Verbatim quote from email supporting that an issue exists",
     )
     center: Optional[str] = Field(
         default=None,
@@ -31,9 +40,23 @@ class EmailClassificationResult(BaseModel):
         default=None,
         description="Extracted system module or component if present, else null.",
     )
-    description: Optional[str] = Field(
-        default=None,
-        description="Concise 1-2 sentence summary of the core issue reported.",
+    subject: str = Field(
+        description="Concise subject <= 80 chars, format: [Center] Module: problem",
+    )
+    description: str = Field(
+        description="Structured description with sections for Redmine",
+    )
+    missing_fields: list[str] = Field(
+        default_factory=list,
+        description="List of required fields that are missing",
+    )
+    attachment_dependent: bool = Field(
+        default=False,
+        description="True if reporter relies on attachment/link with no written explanation",
+    )
+    confidence: float = Field(
+        default=0.0,
+        description="Confidence score 0-1, used as tiebreaker only",
     )
     reasoning: str = Field(
         description=(
@@ -65,6 +88,25 @@ CLASSIFICATION RULES:
 FIELD EXTRACTION:
 - Extract `center`, `module`, and `description` if explicitly stated OR clearly inferrable from the email body.
 - If not present, return `null` for those fields.
+- `issue_evidence` must be a verbatim substring of the email body; do not invent evidence.
+- If the email is attachment/link only with no written description, set `attachment_dependent=true`.
+
+FEW-SHOT EXAMPLES:
+
+Example 1 (Normal issue):
+Subject: Login fails after password reset
+Body: I reset my password but now I can't login. Error says "Invalid credentials".
+Response: is_ticket=true, category="issue", issue_evidence="Error says \"Invalid credentials\"", attachment_dependent=false
+
+Example 2 (Video-only):
+Subject: Look at this
+Body: <no text, just a video attachment>
+Response: is_ticket=true, category="issue", issue_evidence=null, attachment_dependent=true
+
+Example 3 (Noise):
+Subject: Thanks for the help
+Body: Thanks, this is resolved now.
+Response: is_ticket=false, category="noise", issue_evidence=null, attachment_dependent=false
 """
 
 
@@ -97,6 +139,9 @@ class TicketClassifier:
         sender = email.get("sender_email", "").strip()
         body = email.get("classification_body", email.get("body", "")).strip()
 
+        # Truncate body to max input chars at sentence boundaries
+        body = self._truncate_text(body, AI_MAX_INPUT_CHARS)
+
         user_prompt = f"""
 Please analyze the following incoming email:
 
@@ -109,7 +154,12 @@ EMAIL BODY:
 ---
 """
 
+        prompt_hash = hashlib.sha256(CLASSIFICATION_SYSTEM_PROMPT.encode()).hexdigest()[:8]
+
         try:
+            import time
+            start_time = time.time()
+
             response = self.client.models.generate_content(
                 model="gemini-3.1-flash-lite",
                 contents=user_prompt,
@@ -121,24 +171,51 @@ EMAIL BODY:
                 ),
             )
 
+            latency = time.time() - start_time
             result = EmailClassificationResult.model_validate_json(response.text)
+
+            logger.debug(f"AI call: model=gemini-3.1-flash-lite, prompt_hash={prompt_hash}, latency={latency:.2f}s")
+            logger.debug(f"AI response (truncated): {response.text[:4000]}")
+
+            # Validate issue_evidence is in the body
+            if result.issue_evidence and result.issue_evidence not in body:
+                logger.warning(f"issue_evidence not found in body, setting to None")
+                result.issue_evidence = None
+
+            # Validate module is in allowed list
+            if result.module and ALLOWED_MODULES and result.module not in ALLOWED_MODULES:
+                logger.warning(f"Module '{result.module}' not in ALLOWED_MODULES, setting to None")
+                result.module = None
+                result.missing_fields.append("module")
+
+            # Truncate subject to 80 chars at word boundary
+            result.subject = self._truncate_at_word_boundary(result.subject, 80)
 
             logger.info(
                 f"AI Classification: is_ticket={result.is_ticket}, "
-                f"type={result.ticket_type}, reasoning={result.reasoning}"
+                f"category={result.category}, confidence={result.confidence:.2f}, "
+                f"reasoning={result.reasoning}"
             )
 
             # Convert to the format expected by the existing workflow
             return {
                 "is_ticket": result.is_ticket,
-                "ticket_type": result.ticket_type or "Support",
+                "ticket_type": result.category if result.is_ticket else None,
                 "matched_keywords": [],  # Not used in AI approach
                 "structured_feedback": False,  # Not used in AI approach
                 "ai_classification": True,
+                "source": "ai",
                 "center": result.center,
                 "module": result.module,
                 "description": result.description,
                 "reasoning": result.reasoning,
+                "suggested_subject": result.subject,
+                "suggested_description": result.description,
+                "category": result.category,
+                "issue_evidence": result.issue_evidence,
+                "missing_fields": result.missing_fields,
+                "attachment_dependent": result.attachment_dependent,
+                "confidence": result.confidence,
             }
 
         except Exception as e:
@@ -185,8 +262,97 @@ EMAIL BODY:
             "matched_keywords": subject_matches,
             "structured_feedback": is_structured_feedback,
             "ai_classification": False,
+            "source": "fallback",
             "center": None,
             "module": None,
             "description": None,
             "reasoning": "Fallback to rule-based classification due to AI error",
+            "suggested_subject": subject if is_ticket else None,
+            "suggested_description": None,
+            "category": "issue" if is_ticket else "noise",
+            "issue_evidence": None,
+            "missing_fields": [],
+            "attachment_dependent": False,
+            "confidence": 0.5,
         }
+
+    def _truncate_text(self, text: str, max_chars: int) -> str:
+        """
+        Truncate text at sentence or paragraph boundaries.
+        Never truncates mid-word.
+        """
+        if len(text) <= max_chars:
+            return text
+
+        # Try to truncate at sentence boundary
+        truncated = text[:max_chars]
+        last_period = truncated.rfind(".")
+        if last_period > max_chars * 0.8:  # Period is in the last 20%
+            return text[:last_period + 1]
+
+        # Try to truncate at paragraph boundary
+        last_newline = truncated.rfind("\n")
+        if last_newline > max_chars * 0.8:
+            return text[:last_newline]
+
+        # Fallback: truncate at word boundary
+        last_space = truncated.rfind(" ")
+        if last_space > max_chars * 0.8:
+            return text[:last_space]
+
+        # Last resort: truncate at max_chars (shouldn't happen often)
+        return text[:max_chars]
+
+    def _truncate_at_word_boundary(self, text: str, max_chars: int) -> str:
+        """
+        Truncate text at word boundary to max_chars.
+        """
+        if len(text) <= max_chars:
+            return text
+
+        truncated = text[:max_chars]
+        last_space = truncated.rfind(" ")
+        if last_space > 0:
+            return text[:last_space]
+
+        return truncated
+
+
+def decide(classification: dict, context: dict) -> str:
+    """
+    Decide the suggested action based on classification and context.
+
+    Returns one of: CREATE, REVIEW, NEEDS_INFO, IGNORE
+    """
+    category = classification.get("category", "noise")
+    is_ticket = classification.get("is_ticket", False)
+    attachment_dependent = classification.get("attachment_dependent", False)
+    issue_evidence = classification.get("issue_evidence")
+    missing_fields = classification.get("missing_fields", [])
+    confidence = classification.get("confidence", 0.0)
+    is_duplicate = context.get("is_duplicate", False)
+    is_reply = context.get("is_reply", False)
+    sender_allowed = context.get("sender_allowed", True)
+
+    # Ignore noise and questions
+    if category in ("noise", "question"):
+        return "IGNORE"
+
+    # Duplicate or reply -> review/attach
+    if is_duplicate or is_reply:
+        return "ATTACH_OR_REVIEW"
+
+    # Attachment dependent or no evidence -> needs info
+    if attachment_dependent or not issue_evidence:
+        return "NEEDS_INFO"
+
+    # Missing fields or untrusted sender -> review
+    if missing_fields or not sender_allowed:
+        return "REVIEW"
+
+    # Low confidence -> review
+    if confidence < 0.85:
+        return "REVIEW"
+
+    # Default: create
+    return "CREATE"

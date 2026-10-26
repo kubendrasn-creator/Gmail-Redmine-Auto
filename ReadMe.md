@@ -2,6 +2,18 @@
 
 Automated Gmail to Redmine ticket creation with AI-powered email classification.
 
+## Features
+
+- **AI-Powered Classification**: Uses Google Gemini 2.5 Flash for intelligent email classification
+- **Smart Attachment Handling**: Compresses oversized videos, skips files that exceed limits
+- **Link Detection**: Extracts external service links (Google Drive, Dropbox, YouTube, etc.)
+- **Preflight Validation**: Validates configuration and dependencies before processing
+- **Dry-Run Mode**: Preview what would happen without making changes
+- **User Confirmation**: All ticket creations require manual approval (production safety)
+- **Duplicate Detection**: Content fingerprinting prevents duplicate tickets
+- **Thread/Reply Handling**: Detects conversations and attaches replies to existing tickets
+- **Idempotency Support**: Message ID markers prevent duplicate tickets on retry
+
 ## Setup
 
 ### 1. Gmail API Setup
@@ -41,6 +53,16 @@ GMAIL_ALLOWED_SENDERS=user1@example.com,user2@example.com
 
 # AI Classification Configuration (Optional but Recommended)
 GEMINI_API_KEY=your_gemini_api_key
+AI_MAX_INPUT_CHARS=12000
+ALLOWED_MODULES=Module1,Module2,Module3
+REDMINE_TEXT_FORMAT=textile
+
+# Attachment Configuration
+REDMINE_MAX_ATTACHMENT_MB=10
+VIDEO_COMPRESSION_ENABLED=true
+
+# Retry Configuration
+RETRY_MAX_ATTEMPTS=4
 ```
 
 ### 3. Install Dependencies
@@ -59,6 +81,18 @@ Or process a specific message:
 
 ```bash
 python -m backend.main --message-id <message_id>
+```
+
+Dry-run mode (no changes to Redmine):
+
+```bash
+python -m backend.main --dry-run
+```
+
+Skip preflight validation:
+
+```bash
+python -m backend.main --skip-preflight
 ```
 
 ## Gmail Setup Requirements
@@ -104,17 +138,24 @@ The system uses Google's Gemini 2.5 Flash model for intelligent email classifica
 - **Extracts metadata**: center, module, description
 - **Handles forwarded emails** and casual bug reports
 - **Provides reasoning** for classification decisions
+- **Falls back** to rule-based classification if AI fails
 
-If `GEMINI_API_KEY` is not set, the system falls back to rule-based classification.
+## Attachment Handling
 
-## Workflow
+The system intelligently handles email attachments:
 
-1. Fetches recent Gmail messages (configured lookback period)
-2. Checks sender against allowed list
-3. Classifies email using AI (or fallback rules)
-4. For valid tickets, prompts user for confirmation
-5. Creates Redmine ticket with email PDF and attachments
-6. Attaches replies to existing tickets when detected
+- **Size limit**: Configured via `REDMINE_MAX_ATTACHMENT_MB` (default 10 MB)
+- **Video compression**: Automatically compresses oversized videos using FFmpeg
+- **Skipped files**: Files that exceed limits are kept locally and noted in the ticket
+- **Streaming uploads**: Large files are streamed to avoid memory issues
+
+## CLI Options
+
+- `--message-id`: Process a specific Gmail message
+- `--dry-run`: Run without making changes to Redmine or database
+- `--skip-preflight`: Skip preflight validation checks
+- `--lookback-hours N`: Override Gmail lookback hours
+- `--max-results N`: Override Gmail max results
 
 ## File Structure
 
@@ -130,10 +171,16 @@ Gmail-Redmine/
 │   ├── redmine/
 │   ├── ticketing/
 │   ├── processor/
-│   └── storage/
+│   ├── storage/
+│   ├── preflight.py      (Preflight validation)
+│   ├── attachments.py    (Attachment pipeline)
+│   ├── links.py          (Link detection)
+│   ├── retry.py          (Retry/backoff logic)
+│   └── main.py
 ├── data/
 │   ├── database/
 │   └── logs/
+├── attachments/          (Original attachment storage)
 ├── generated_emails/
 └── email_attachments/
 ```
@@ -145,3 +192,4 @@ Gmail-Redmine/
 - Both files are in `.gitignore` and should NOT be committed to git
 - The app uses Gmail API with `readonly` scope (can only read emails, not send/delete)
 - You must be logged into the Google account that owns the Gmail during authentication
+- FFmpeg is required for video compression (optional, but recommended)

@@ -54,6 +54,24 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PROCESSED_MESSAGE_RETENTION_DAYS = int(os.getenv("PROCESSED_MESSAGE_RETENTION_DAYS", "30"))
 THREAD_RETENTION_DAYS = int(os.getenv("THREAD_RETENTION_DAYS", "180"))
 
+# Attachment configuration
+REDMINE_MAX_ATTACHMENT_MB = int(os.getenv("REDMINE_MAX_ATTACHMENT_MB", "10"))
+ATTACHMENTS_DIR = BASE_DIR / "email_attachments"
+VIDEO_COMPRESSION_ENABLED = os.getenv("VIDEO_COMPRESSION_ENABLED", "true").lower() == "true"
+
+# AI configuration
+AI_MAX_INPUT_CHARS = int(os.getenv("AI_MAX_INPUT_CHARS", "12000"))
+ALLOWED_MODULES = [
+    m.strip()
+    for m in os.getenv("ALLOWED_MODULES", "").split(",")
+    if m.strip()
+]
+REDMINE_TEXT_FORMAT = os.getenv("REDMINE_TEXT_FORMAT", "textile")
+REDMINE_MESSAGEID_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_MESSAGEID_CUSTOM_FIELD_ID") or 0)
+
+# Retry configuration
+RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "4"))
+
 # Paths and directories
 LOG_FILE_PATH = BASE_DIR / "data" / "logs" / "gmail_redmine.log"
 GENERATED_EMAILS_DIR = BASE_DIR / "generated_emails"
@@ -83,17 +101,18 @@ def validate_settings():
     if not REDMINE_ASSIGNEE_ID:
         missing.append("REDMINE_ASSIGNEE_ID")
     
-    if not REDMINE_CATEGORY_CUSTOM_FIELD_ID:
-        missing.append("REDMINE_CATEGORY_CUSTOM_FIELD_ID")
-    
-    if not REDMINE_CATEGORY_VALUE:
-        missing.append("REDMINE_CATEGORY_VALUE")
-    
-    if not REDMINE_SEVERITY_CUSTOM_FIELD_ID:
-        missing.append("REDMINE_SEVERITY_CUSTOM_FIELD_ID")
-    
-    if not REDMINE_SEVERITY_VALUE:
-        missing.append("REDMINE_SEVERITY_VALUE")
+    # Custom fields are now optional
+    # if not REDMINE_CATEGORY_CUSTOM_FIELD_ID:
+    #     missing.append("REDMINE_CATEGORY_CUSTOM_FIELD_ID")
+    #
+    # if not REDMINE_CATEGORY_VALUE:
+    #     missing.append("REDMINE_CATEGORY_VALUE")
+    #
+    # if not REDMINE_SEVERITY_CUSTOM_FIELD_ID:
+    #     missing.append("REDMINE_SEVERITY_CUSTOM_FIELD_ID")
+    #
+    # if not REDMINE_SEVERITY_VALUE:
+    #     missing.append("REDMINE_SEVERITY_VALUE")
 
     if not GMAIL_MAX_RESULTS:
         missing.append("GMAIL_MAX_RESULTS")
