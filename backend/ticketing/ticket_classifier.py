@@ -65,6 +65,34 @@ class EmailClassificationResult(BaseModel):
     )
 
 
+class SubjectTriageResult(BaseModel):
+    """Conservative first-pass routing based on the subject line only."""
+
+    decision: Literal["noise", "inspect_body"] = Field(
+        description=(
+            "'noise' only when the subject is clearly and unambiguously "
+            "non-actionable; otherwise 'inspect_body'."
+        )
+    )
+    confidence: float = Field(default=0.0, description="Confidence score from 0 to 1.")
+    reasoning: str = Field(description="Short reason based only on the subject.")
+
+
+SUBJECT_TRIAGE_PROMPT = """
+You are the first-stage email subject triage for an IT support ticket workflow.
+You receive only the subject line. You do not receive the email body, sender, or attachments.
+
+Return decision="noise" ONLY when the subject alone makes it unmistakably
+non-actionable, such as an explicit thank-you/resolution, greeting, personal
+chatter, newsletter, marketing message, or meeting invitation.
+
+Return decision="inspect_body" for every possible support issue, request, follow-up,
+ambiguous/generic subject, forwarded message, status report, or anything that could
+reasonably need technical or operational action. When uncertain, inspect the body.
+Do not assume a short or vague subject is noise.
+"""
+
+
 CLASSIFICATION_SYSTEM_PROMPT = """
 You are an intelligent Email Classifier and Data Extraction Agent for an enterprise IT/Helpdesk ticketing system (Redmine).
 
@@ -139,13 +167,56 @@ class TicketClassifier:
             return self._fallback_classification(email)
 
         subject = email.get("subject", "").strip()
-        sender = email.get("sender_email", "").strip()
-        body = email.get("classification_body", email.get("body", "")).strip()
+        usage_totals = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "tool_input_tokens": 0,
+            "total_tokens": 0,
+        }
+        usage_reported = False
 
-        # Truncate body to max input chars at sentence boundaries
-        body = self._truncate_text(body, AI_MAX_INPUT_CHARS)
+        try:
+            import time
+            if subject:
+                triage_prompt = f"Subject: {subject}"
+                start_time = time.time()
+                triage_response = self.client.models.generate_content(
+                    model="gemini-3.1-flash-lite",
+                    contents=triage_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SUBJECT_TRIAGE_PROMPT,
+                        response_mime_type="application/json",
+                        response_schema=SubjectTriageResult,
+                        temperature=0,
+                    ),
+                )
+                triage_usage = self._extract_token_usage(triage_response)
+                if triage_usage is not None:
+                    usage_reported = True
+                    self._add_usage(usage_totals, triage_usage)
+                triage = SubjectTriageResult.model_validate_json(triage_response.text)
+                triage_latency = time.time() - start_time
+                logger.debug(
+                    "Subject triage: model=gemini-3.1-flash-lite, "
+                    "latency=%.2fs, decision=%s",
+                    triage_latency,
+                    triage.decision,
+                )
+                if triage.decision == "noise":
+                    result = self._subject_noise_result(subject, triage)
+                    return self._with_token_usage(
+                        result,
+                        usage_totals,
+                        usage_reported,
+                    )
 
-        user_prompt = f"""
+            # Do not read or submit the email body until subject triage says
+            # that it could be actionable or the subject is blank/ambiguous.
+            sender = email.get("sender_email", "").strip()
+            body = email.get("classification_body", email.get("body", "")).strip()
+            body = self._truncate_text(body, AI_MAX_INPUT_CHARS)
+            user_prompt = f"""
 Please analyze the following incoming email:
 
 SENDER: {sender}
@@ -156,14 +227,10 @@ EMAIL BODY:
 {body}
 ---
 """
-
-        prompt_hash = hashlib.sha256(CLASSIFICATION_SYSTEM_PROMPT.encode()).hexdigest()[:8]
-        token_usage = None
-
-        try:
-            import time
+            prompt_hash = hashlib.sha256(
+                CLASSIFICATION_SYSTEM_PROMPT.encode()
+            ).hexdigest()[:8]
             start_time = time.time()
-
             response = self.client.models.generate_content(
                 model="gemini-3.1-flash-lite",
                 contents=user_prompt,
@@ -174,26 +241,20 @@ EMAIL BODY:
                     temperature=0.1,
                 ),
             )
-
-            token_usage = self._extract_token_usage(response)
-            if token_usage is not None:
-                if self.usage_callback:
-                    self.usage_callback(token_usage)
-                logger.info(
-                    "Gemini token usage: input=%s output=%s thinking=%s "
-                    "tool_input=%s total=%s",
-                    token_usage["input_tokens"],
-                    token_usage["output_tokens"],
-                    token_usage["thinking_tokens"],
-                    token_usage["tool_input_tokens"],
-                    token_usage["total_tokens"],
-                )
-
-            latency = time.time() - start_time
+            body_usage = self._extract_token_usage(response)
+            if body_usage is not None:
+                usage_reported = True
+                self._add_usage(usage_totals, body_usage)
             result = EmailClassificationResult.model_validate_json(response.text)
 
-            logger.debug(f"AI call: model=gemini-3.1-flash-lite, prompt_hash={prompt_hash}, latency={latency:.2f}s")
-            logger.debug(f"AI response (truncated): {response.text[:4000]}")
+            latency = time.time() - start_time
+            logger.debug(
+                "AI body classification: model=gemini-3.1-flash-lite, "
+                "prompt_hash=%s, latency=%.2fs",
+                prompt_hash,
+                latency,
+            )
+            logger.debug("AI response (truncated): %s", response.text[:4000])
 
             # Validate issue_evidence is in the body
             if result.issue_evidence and result.issue_evidence not in body:
@@ -216,7 +277,7 @@ EMAIL BODY:
             )
 
             # Convert to the format expected by the existing workflow
-            return {
+            classification = {
                 "is_ticket": result.is_ticket,
                 "ticket_type": result.category if result.is_ticket else None,
                 "matched_keywords": [],  # Not used in AI approach
@@ -234,16 +295,68 @@ EMAIL BODY:
                 "missing_fields": result.missing_fields,
                 "attachment_dependent": result.attachment_dependent,
                 "confidence": result.confidence,
-                "token_usage": token_usage,
             }
+            return self._with_token_usage(
+                classification,
+                usage_totals,
+                usage_reported,
+            )
 
         except Exception as e:
             logger.error(f"Gemini classification failed: {e}", exc_info=True)
             logger.info("Falling back to rule-based classification.")
             fallback = self._fallback_classification(email)
-            if token_usage is not None:
-                fallback["token_usage"] = token_usage
-            return fallback
+            return self._with_token_usage(
+                fallback,
+                usage_totals,
+                usage_reported,
+            )
+
+    def _record_token_usage(self, usage):
+        if self.usage_callback:
+            self.usage_callback(usage)
+        logger.info(
+            "Gemini token usage: input=%s output=%s thinking=%s "
+            "tool_input=%s total=%s",
+            usage["input_tokens"],
+            usage["output_tokens"],
+            usage["thinking_tokens"],
+            usage["tool_input_tokens"],
+            usage["total_tokens"],
+        )
+
+    def _add_usage(self, totals, usage):
+        for key in totals:
+            totals[key] += usage[key]
+        self._record_token_usage(usage)
+
+    @staticmethod
+    def _with_token_usage(classification, totals, usage_reported):
+        if usage_reported:
+            classification["token_usage"] = dict(totals)
+        return classification
+
+    @staticmethod
+    def _subject_noise_result(subject, triage):
+        return {
+            "is_ticket": False,
+            "ticket_type": None,
+            "matched_keywords": [],
+            "structured_feedback": False,
+            "ai_classification": True,
+            "source": "ai_subject",
+            "center": None,
+            "module": None,
+            "description": "",
+            "reasoning": triage.reasoning,
+            "suggested_subject": subject[:80],
+            "suggested_description": "",
+            "category": "noise",
+            "issue_evidence": None,
+            "missing_fields": [],
+            "attachment_dependent": False,
+            "confidence": triage.confidence,
+        }
 
     @staticmethod
     def _extract_token_usage(response) -> dict[str, int] | None:
@@ -361,7 +474,8 @@ EMAIL BODY:
         # Last resort: truncate at max_chars (shouldn't happen often)
         return text[:max_chars]
 
-    def _truncate_at_word_boundary(self, text: str, max_chars: int) -> str:
+    @staticmethod
+    def _truncate_at_word_boundary(text: str, max_chars: int) -> str:
         """
         Truncate text at word boundary to max_chars.
         """

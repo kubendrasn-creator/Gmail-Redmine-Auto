@@ -49,7 +49,7 @@ class AppState:
         self.worker_future = None
         self.log_handler = None
 
-        self.store.mark_stale_pending_superseded()
+        self.store.mark_stale_pending_failed()
         for saved in self.store.list_items():
             item = saved["payload"]
             item.update({

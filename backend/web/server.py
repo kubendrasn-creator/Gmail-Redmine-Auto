@@ -186,6 +186,8 @@ def _run_cycle(state: AppState, dry_run: bool, message_ids=None):
                 if item is None:
                     if result.get("action") == "already_processed":
                         summary["duplicates_skipped"] += 1
+                    elif result.get("action") == "not_a_ticket":
+                        summary["ignored"] += 1
                     continue
 
                 status_map = {
@@ -196,7 +198,6 @@ def _run_cycle(state: AppState, dry_run: bool, message_ids=None):
                     "rejected": "REJECTED",
                     "duplicate": "REJECTED",
                     "skipped_by_user": "SKIPPED",
-                    "already_processed": "SUPERSEDED",
                 }
                 status = status_map.get(result.get("action"), "DONE")
                 _finish_item(

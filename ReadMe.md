@@ -148,6 +148,11 @@ generated PDFs.
 | Skip | Leave the message unmarked so it can be reviewed in a later run |
 | Dry-run preview | Show the ticket payload without Redmine writes or processed-message updates |
 
+If the app closes while an email is awaiting review, that item is marked **FAILED**
+with a message explaining that no approval or ticket creation occurred. Use **Retry**
+to reopen the message for a fresh review. This replaces the previous misleading
+`SUPERSEDED` status.
+
 ## Gmail Setup Requirements
 
 ### 1. Google Cloud Console Setup
@@ -187,6 +192,11 @@ The token file is refreshed automatically when it expires.
 
 The system uses Google's Gemini 3.1 Flash-Lite model for intelligent email classification:
 
+- First checks only the subject. Clearly obvious noise is skipped without sending
+  the email body to Gemini.
+- Possible issues and ambiguous subjects continue to a full-body classification
+  before the UI asks for approval or rejection.
+- Subject-only triage is deliberately conservative: when unsure, it inspects the body.
 - **Classifies emails** as support tickets vs. regular emails
 - **Extracts metadata**: center, module, description
 - **Handles forwarded emails** and casual bug reports

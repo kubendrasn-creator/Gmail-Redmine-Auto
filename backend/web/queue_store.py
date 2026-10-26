@@ -80,10 +80,22 @@ class PendingItemStore:
             for row in rows
         ]
 
-    def mark_stale_pending_superseded(self):
+    def mark_stale_pending_failed(self):
+        now = self._now()
         with self._connection() as connection:
-            connection.execute(
-                "UPDATE pending_items SET status = 'SUPERSEDED', updated_at = ? "
-                "WHERE status IN ('PENDING', 'WAITING_FOR_USER')",
-                (self._now(),),
-            )
+            rows = connection.execute(
+                "SELECT id, payload_json FROM pending_items "
+                "WHERE status IN ('PENDING', 'WAITING_FOR_USER', 'SUPERSEDED')"
+            ).fetchall()
+            for row in rows:
+                payload = json.loads(row["payload_json"])
+                payload["status"] = "FAILED"
+                payload["error"] = (
+                    "This email was not approved or created. Its review was "
+                    "interrupted when the app closed. Retry to reopen it."
+                )
+                connection.execute(
+                    "UPDATE pending_items SET payload_json = ?, status = 'FAILED', "
+                    "updated_at = ? WHERE id = ?",
+                    (json.dumps(payload, ensure_ascii=False), now, row["id"]),
+                )

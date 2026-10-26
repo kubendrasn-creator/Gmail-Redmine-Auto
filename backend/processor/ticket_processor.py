@@ -150,7 +150,7 @@ class TicketProcessor:
         if classification.get("ai_classification") and classification.get("reasoning"):
             logger.info(f"AI Reasoning: {classification['reasoning']}")
 
-        if not classification["is_ticket"] and not review_all and not is_duplicate and not is_reply:
+        if not classification["is_ticket"] and not is_duplicate and not is_reply:
             logger.info(f"Message {message_id} is not a support ticket. Recording and skipping.")
             self._record_decision(
                 message_id,
