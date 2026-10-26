@@ -8,6 +8,8 @@ from backend.config.settings import (
     REDMINE_ASSIGNEE_ID,
     REDMINE_CATEGORY_CUSTOM_FIELD_ID,
     REDMINE_CATEGORY_VALUE,
+    REDMINE_ISSUES_CATEGORY,
+    REDMINE_ISSUES_CATEGORY_VALUE,
     REDMINE_SEVERITY_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_VALUE,
     REDMINE_ESTIMATED_HOURS,
@@ -103,17 +105,27 @@ class RedmineClient:
             "estimated_hours": REDMINE_ESTIMATED_HOURS,
             "start_date": start_date,
             "due_date": end_date,
-            "custom_fields": [
-                {
-                    "id": REDMINE_CATEGORY_CUSTOM_FIELD_ID,
-                    "value": REDMINE_CATEGORY_VALUE,
-                },
-                {
-                    "id": REDMINE_SEVERITY_CUSTOM_FIELD_ID,
-                    "value": REDMINE_SEVERITY_VALUE,
-                },
-            ],
         }
+
+        # Add built-in category if configured
+        if REDMINE_ISSUES_CATEGORY:
+            issue["category_id"] = REDMINE_ISSUES_CATEGORY
+
+        # Add custom fields
+        custom_fields = []
+        if REDMINE_CATEGORY_CUSTOM_FIELD_ID and REDMINE_CATEGORY_VALUE:
+            custom_fields.append({
+                "id": REDMINE_CATEGORY_CUSTOM_FIELD_ID,
+                "value": REDMINE_CATEGORY_VALUE,
+            })
+        if REDMINE_SEVERITY_CUSTOM_FIELD_ID and REDMINE_SEVERITY_VALUE:
+            custom_fields.append({
+                "id": REDMINE_SEVERITY_CUSTOM_FIELD_ID,
+                "value": REDMINE_SEVERITY_VALUE,
+            })
+
+        if custom_fields:
+            issue["custom_fields"] = custom_fields
 
         payload = {
             "issue": issue
