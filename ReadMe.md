@@ -203,6 +203,8 @@ The system uses Google's Gemini 3.1 Flash-Lite model for intelligent email class
   before the UI asks for approval or rejection.
 - Subject-only triage is deliberately conservative: when unsure, it inspects the body.
 - **Classifies emails** as support tickets vs. regular emails
+- Treats requests to create or configure a center, facility, site, or location as
+  actionable tickets, even when no software error is reported
 - **Extracts metadata**: center, module, description
 - **Handles forwarded emails** and casual bug reports
 - **Provides reasoning** for classification decisions

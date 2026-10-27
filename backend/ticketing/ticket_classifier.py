@@ -1,5 +1,6 @@
 import hashlib
-from typing import Callable, Optional, Literal
+import re
+from typing import Callable, Literal
 
 from google import genai
 from google.genai import types
@@ -27,20 +28,23 @@ class EmailClassificationResult(BaseModel):
     category: Literal["issue", "question", "noise", "followup"] = Field(
         description="Classification category: issue, question, noise, or followup",
     )
-    issue_evidence: Optional[str] = Field(
-        default=None,
-        description="Verbatim quote from email supporting that an issue exists",
+    issue_evidence: str = Field(
+        default="",
+        description="Verbatim quote from email supporting that an issue exists, or empty string if none",
     )
-    center: Optional[str] = Field(
-        default=None,
-        description="Extracted facility/center name if present, else null.",
+    center: str = Field(
+        default="",
+        description="Extracted facility/center name if present, else empty string.",
     )
-    module: Optional[str] = Field(
-        default=None,
-        description="Extracted system module or component if present, else null.",
+    module: str = Field(
+        default="",
+        description="Extracted system module or component if present, else empty string.",
     )
     subject: str = Field(
-        description="Concise subject <= 80 chars, format: [Center] Module: problem",
+        description=(
+            "Concise subject <= 80 chars. Prefix with [Center] only when a real "
+            "center is identified; otherwise omit the center prefix."
+        ),
     )
     description: str = Field(
         description="Structured description with sections for Redmine",
@@ -114,7 +118,9 @@ CLASSIFICATION RULES:
 
 FIELD EXTRACTION:
 - Extract `center`, `module`, and `description` if explicitly stated OR clearly inferrable from the email body.
-- If not present, return `null` for those fields.
+- If `issue_evidence`, `center`, or `module` is not present, return an empty string for that field.
+- If the center is not identified, do not mention it in the subject or description. Never use placeholders such as "[Unknown]", "Unknown", or "N/A".
+- A request to create, add, set up, register, onboard, or configure a new center, facility, site, or location is an actionable support ticket even when no software error is reported.
 - `issue_evidence` must be a verbatim substring of the email body; do not invent evidence.
 - If the email is attachment/link only with no written description, set `attachment_dependent=true`.
 
@@ -267,6 +273,8 @@ EMAIL BODY:
                 result.module = None
                 result.missing_fields.append("module")
 
+            self._omit_missing_center_placeholders(result)
+
             # Truncate subject to 80 chars at word boundary
             result.subject = self._truncate_at_word_boundary(result.subject, 80)
 
@@ -284,14 +292,14 @@ EMAIL BODY:
                 "structured_feedback": False,  # Not used in AI approach
                 "ai_classification": True,
                 "source": "ai",
-                "center": result.center,
-                "module": result.module,
+                "center": result.center or None,
+                "module": result.module or None,
                 "description": result.description,
                 "reasoning": result.reasoning,
                 "suggested_subject": result.subject,
                 "suggested_description": result.description,
                 "category": result.category,
-                "issue_evidence": result.issue_evidence,
+                "issue_evidence": result.issue_evidence or None,
                 "missing_fields": result.missing_fields,
                 "attachment_dependent": result.attachment_dependent,
                 "confidence": result.confidence,
@@ -335,6 +343,37 @@ EMAIL BODY:
         if usage_reported:
             classification["token_usage"] = dict(totals)
         return classification
+
+    @staticmethod
+    def _omit_missing_center_placeholders(result: EmailClassificationResult) -> None:
+        missing_values = {
+            "unknown",
+            "unknown center",
+            "n/a",
+            "na",
+            "not provided",
+            "none",
+        }
+        if result.center and result.center.strip().casefold() not in missing_values:
+            return
+
+        result.center = ""
+        result.subject = re.sub(
+            r"^\s*\[(?:unknown(?:\s+center)?|n/?a|not\s+provided|none)\]\s*",
+            "",
+            result.subject,
+            flags=re.IGNORECASE,
+        )
+        result.description = "\n".join(
+            line
+            for line in result.description.splitlines()
+            if not re.match(
+                r"^\s*(?:[-*]\s*)?center\s*:\s*"
+                r"(?:unknown(?:\s+center)?|n/?a|not\s+provided|none)\s*[.!]?\s*$",
+                line,
+                flags=re.IGNORECASE,
+            )
+        )
 
     @staticmethod
     def _subject_noise_result(subject, triage):
@@ -411,6 +450,15 @@ EMAIL BODY:
             "incorrect", "not working", "doesn't work", "does not work",
             "unable", "failure",
         ]
+        CENTER_CREATION_PATTERN = re.compile(
+            r"\b(?:new|creat\w*|add\w*|set\s+up|setup|establish\w*|"
+            r"onboard\w*|register\w*|configur\w*)\b.{0,100}\b"
+            r"(?:center|centre|facility|site|location)\b"
+            r"|\b(?:center|centre|facility|site|location)\b.{0,100}\b"
+            r"(?:creat\w*|add\w*|set\s+up|setup|establish\w*|"
+            r"onboard\w*|register\w*|configur\w*)\b",
+            re.IGNORECASE | re.DOTALL,
+        )
 
         FEEDBACK_FIELDS = ["center:", "module:", "description:"]
 
@@ -418,8 +466,13 @@ EMAIL BODY:
             keyword for keyword in SUBJECT_KEYWORDS
             if keyword in subject_lower
         ]
+        center_creation = bool(
+            CENTER_CREATION_PATTERN.search(f"{subject}\n{body}")
+        )
 
         is_structured_feedback = all(field in body_lower for field in FEEDBACK_FIELDS)
+        if center_creation:
+            subject_matches.append("center creation")
         is_ticket = is_structured_feedback or bool(subject_matches)
 
         logger.info(
