@@ -211,7 +211,8 @@ field. The module custom field has one field ID, configured as
 `module_custom_field_id`; text options do not have individual IDs. Keep module names
 in the `modules` list to validate classifier output, and set the
 `center_creation.category` and `center_creation.module` defaults as needed. Start
-from `env/config/ticket_fields.example.json`.
+from `env/config/ticket_fields.example.json`. The path defaults to
+`env/config/ticket_fields.json` and can be overridden with `TICKET_FIELDS_FILE`.
 
 ### Ticket prefill and review metadata
 
@@ -224,12 +225,14 @@ Assignee names are extracted from the email and resolved only through the local
 `env/config/people.json` name-to-Redmine-user-ID mapping (or the `PEOPLE` environment
 setting); the model does not choose Redmine user IDs. Edit that JSON file directly.
 Partial name matches are accepted only when they identify a single configured user;
-the matched configured name and user ID are used for assignment. `DEFAULT_ASSIGNEE_ID`
-or the existing `REDMINE_ASSIGNEE_ID` is used when no configured person can be resolved.
+the matched configured name and user ID are used for assignment.
+`REDMINE_ASSIGNEE_ID` is the fallback assignee when no configured person can be
+resolved; there is no separate default-assignee setting.
 
 `REQUIRED_FIELDS` is a comma-separated list from `subject`, `description`,
-`ticket_type`, `center`, `module`, and `assignee`. The default is
-`ticket_type`; unsupported names are rejected during configuration validation.
+`ticket_type`, `center`, `module`, and `assignee`. The default is `ticket_type`;
+add fields only if approval should be blocked until they are provided. Unsupported
+names are rejected during configuration validation.
 Center and enterprise are optional when neither is present in the email.
 
 Center-creation requests are classified as `center_creation`. Their module and

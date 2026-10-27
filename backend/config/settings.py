@@ -22,7 +22,15 @@ REDMINE_PROJECT_ID = int(os.getenv("REDMINE_PROJECT_ID") or 0)
 REDMINE_SUPPORT_TRACKER_ID = int(os.getenv("REDMINE_SUPPORT_TRACKER_ID") or 0)
 REDMINE_ASSIGNEE_ID = int(os.getenv("REDMINE_ASSIGNEE_ID") or 0)
 
-TICKET_FIELDS_FILE = ENV_DIR / "config" / "ticket_fields.json"
+def _configured_path(value, default):
+    path = Path(value) if value else default
+    return path if path.is_absolute() else BASE_DIR / path
+
+
+TICKET_FIELDS_FILE = _configured_path(
+    os.getenv("TICKET_FIELDS_FILE"),
+    ENV_DIR / "config" / "ticket_fields.json",
+)
 _ticket_fields = {}
 if TICKET_FIELDS_FILE.exists():
     _ticket_fields = json.loads(TICKET_FIELDS_FILE.read_text(encoding="utf-8"))
@@ -121,11 +129,7 @@ if _default_module and _configured_modules and _default_module not in _configure
 ALLOWED_MODULES = (
     [module.strip() for module in _configured_modules]
     if _configured_modules is not None
-    else [
-        module.strip()
-        for module in os.getenv("ALLOWED_MODULES", "").split(",")
-        if module.strip()
-    ]
+    else []
 )
 LOGO_IMAGE_PATH = ENV_DIR / "logo.png"
 LOGO_IMAGE_MAX_PIXEL_DIFFERENCE = float(
@@ -138,13 +142,11 @@ STRIP_BOILERPLATE = os.getenv("STRIP_BOILERPLATE", "true").lower() == "true"
 REDMINE_CENTER_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_CENTER_CUSTOM_FIELD_ID") or 0)
 REDMINE_FEEDBACK_TRACKER_ID = int(os.getenv("REDMINE_FEEDBACK_TRACKER_ID") or 0)
 REDMINE_METADATA_TTL_MIN = int(os.getenv("REDMINE_METADATA_TTL_MIN", "60"))
-PEOPLE_FILE = Path(
-    os.getenv("PEOPLE_FILE", str(ENV_DIR / "config" / "people.json"))
+PEOPLE_FILE = _configured_path(
+    os.getenv("PEOPLE_FILE"),
+    ENV_DIR / "config" / "people.json",
 )
 PEOPLE = os.getenv("PEOPLE", "")
-DEFAULT_ASSIGNEE_ID = int(
-    os.getenv("DEFAULT_ASSIGNEE_ID") or REDMINE_ASSIGNEE_ID or 0
-)
 ASSIGNEE_ACTION_WORDS = [
     value.strip().lower()
     for value in os.getenv(

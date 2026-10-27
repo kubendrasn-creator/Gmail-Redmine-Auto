@@ -35,7 +35,7 @@ from backend.storage.review_metadata import ReviewMetadataStore
 from backend.config.settings import REDMINE_CENTER_CUSTOM_FIELD_ID
 from backend.config.settings import (
     ALLOWED_MODULES,
-    DEFAULT_ASSIGNEE_ID,
+    REDMINE_ASSIGNEE_ID,
     REDMINE_FEEDBACK_TRACKER_ID,
     REDMINE_TICKET_FIELD_DEFAULTS,
 )
@@ -579,8 +579,8 @@ class TicketProcessor:
             raise ValueError("Center is not an allowed Redmine list-field value")
         people = load_people()
         allowed_assignee_ids = set(people.values())
-        if DEFAULT_ASSIGNEE_ID:
-            allowed_assignee_ids.add(DEFAULT_ASSIGNEE_ID)
+        if REDMINE_ASSIGNEE_ID:
+            allowed_assignee_ids.add(REDMINE_ASSIGNEE_ID)
         if assignee_id is not None and assignee_id not in allowed_assignee_ids:
             raise ValueError("Assignee must be selected from the configured people mapping")
         self._log_review_decision(

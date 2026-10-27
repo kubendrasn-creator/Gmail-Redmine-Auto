@@ -4,9 +4,9 @@ import string
 
 from backend.config.settings import (
     ASSIGNEE_ACTION_WORDS,
-    DEFAULT_ASSIGNEE_ID,
     PEOPLE,
     PEOPLE_FILE,
+    REDMINE_ASSIGNEE_ID,
 )
 
 
@@ -126,7 +126,7 @@ def resolve_assignee(classification, body):
     if resolved is None:
         return {
             "assignee_name": "",
-            "assignee_id": DEFAULT_ASSIGNEE_ID or None,
+            "assignee_id": REDMINE_ASSIGNEE_ID or None,
             "assignee_source": "default",
             "assignee_status": "suggested",
             "assignee_note": "No assignee named in the email.",

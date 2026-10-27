@@ -10,8 +10,8 @@ from backend.config.settings import (
     AI_MAX_INPUT_CHARS,
     ALLOWED_MODULES,
     AI_THINKING_BUDGET,
-    DEFAULT_ASSIGNEE_ID,
     GEMINI_API_KEY,
+    REDMINE_ASSIGNEE_ID,
 )
 from backend.ticketing.assignees import resolve_assignee
 from backend.utils.logger import get_logger
@@ -409,7 +409,7 @@ EMAIL BODY:
                 "assignee_note": assignee_result["assignee_note"],
                 "people": assignee_result["people"],
                 "allowed_modules": ALLOWED_MODULES,
-                "default_assignee_id": DEFAULT_ASSIGNEE_ID,
+                "default_assignee_id": REDMINE_ASSIGNEE_ID,
                 "description": result.description,
                 "reasoning": result.reasoning,
                 "suggested_subject": result.subject,
@@ -623,7 +623,7 @@ EMAIL BODY:
             "assignee_note": assignee_result["assignee_note"],
             "people": assignee_result["people"],
             "allowed_modules": ALLOWED_MODULES,
-            "default_assignee_id": DEFAULT_ASSIGNEE_ID,
+            "default_assignee_id": REDMINE_ASSIGNEE_ID,
             "description": description or None,
             "reasoning": "Fallback to rule-based classification due to AI error",
             "suggested_subject": suggested_subject if is_ticket else None,

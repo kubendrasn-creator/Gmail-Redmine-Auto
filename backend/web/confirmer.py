@@ -3,11 +3,11 @@ import uuid
 
 from backend.config.settings import REDMINE_PROJECT_ID
 from backend.config.settings import (
-    DEFAULT_ASSIGNEE_ID,
     REDMINE_FEEDBACK_TRACKER_ID,
     REDMINE_SUPPORT_TRACKER_ID,
     REDMINE_CENTER_CUSTOM_FIELD_ID,
     REDMINE_MODULE_CUSTOM_FIELD_ID,
+    REDMINE_ASSIGNEE_ID,
 )
 from backend.processor.confirmation import (
     ConfirmAction,
@@ -108,7 +108,7 @@ class WebConfirmer:
                 ),
                 "center_is_list": classification.get("center_list_values") is not None,
                 "assignees": classification.get("people", {}),
-                "default_assignee_id": DEFAULT_ASSIGNEE_ID,
+                "default_assignee_id": REDMINE_ASSIGNEE_ID,
                 "support_tracker_id": REDMINE_SUPPORT_TRACKER_ID,
                 "feedback_tracker_id": REDMINE_FEEDBACK_TRACKER_ID,
                 "center_custom_field_id": REDMINE_CENTER_CUSTOM_FIELD_ID,

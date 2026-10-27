@@ -17,9 +17,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.config.settings import (
     ALLOWED_MODULES,
-    DEFAULT_ASSIGNEE_ID,
     REDMINE_MAX_ATTACHMENT_MB,
     REDMINE_URL,
+    REDMINE_ASSIGNEE_ID,
     REDMINE_FEEDBACK_TRACKER_ID,
     REDMINE_TICKET_FIELD_DEFAULTS,
     VIDEO_COMPRESSION_ENABLED,
@@ -491,8 +491,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="Select an allowed module")
         people = load_people()
         allowed_assignees = set(people.values())
-        if DEFAULT_ASSIGNEE_ID:
-            allowed_assignees.add(DEFAULT_ASSIGNEE_ID)
+        if REDMINE_ASSIGNEE_ID:
+            allowed_assignees.add(REDMINE_ASSIGNEE_ID)
         if payload.assignee_id is not None and payload.assignee_id not in allowed_assignees:
             raise HTTPException(status_code=422, detail="Select an assignee from the configured people mapping")
         allowed_center_values = classification.get("center_list_values")

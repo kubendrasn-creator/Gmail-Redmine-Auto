@@ -16,7 +16,6 @@ from backend.config.settings import (
     GENERATED_EMAILS_DIR,
     REDMINE_API_KEY,
     REDMINE_ASSIGNEE_ID,
-    DEFAULT_ASSIGNEE_ID,
     PEOPLE,
     PEOPLE_FILE,
     REDMINE_CENTER_CUSTOM_FIELD_ID,
@@ -271,24 +270,24 @@ class PreflightValidator:
                 status=CheckStatus.WARN,
                 message=f"No assignee mapping found in {PEOPLE_FILE} or PEOPLE",
             )
-        if not DEFAULT_ASSIGNEE_ID:
+        if not REDMINE_ASSIGNEE_ID:
             return CheckResult(
                 name="Default Redmine assignee",
                 status=CheckStatus.WARN,
-                message="No default assignee configured",
+                message="REDMINE_ASSIGNEE_ID is not configured",
             )
         try:
-            RedmineClient().get_user(DEFAULT_ASSIGNEE_ID)
+            RedmineClient().get_user(REDMINE_ASSIGNEE_ID)
             return CheckResult(
                 name="Default Redmine assignee",
                 status=CheckStatus.OK,
-                message=f"Redmine user {DEFAULT_ASSIGNEE_ID} exists",
+                message=f"Redmine user {REDMINE_ASSIGNEE_ID} exists",
             )
         except Exception as exc:
             return CheckResult(
                 name="Default Redmine assignee",
                 status=CheckStatus.FAIL,
-                message=f"Redmine user {DEFAULT_ASSIGNEE_ID} could not be verified: {exc}",
+                message=f"Redmine user {REDMINE_ASSIGNEE_ID} could not be verified: {exc}",
             )
 
     def _check_center_field_metadata(self) -> CheckResult:
