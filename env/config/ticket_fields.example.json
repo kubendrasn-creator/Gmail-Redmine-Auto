@@ -1,0 +1,16 @@
+{
+  "categories": {
+    "Support": 1,
+    "Operations": 2
+  },
+  "module_custom_field_id": 7,
+  "modules": [
+    "Admissions",
+    "Billing",
+    "Reporting"
+  ],
+  "center_creation": {
+    "category": "Operations",
+    "module": "Admissions"
+  }
+}

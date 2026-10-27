@@ -1,7 +1,10 @@
 import base64
+from dataclasses import asdict
 import html
 import re
 from email.utils import parseaddr
+
+from backend.gmail.email_cleaner import build_ai_input, parse_thread
 
 
 class EmailParser:
@@ -13,6 +16,7 @@ class EmailParser:
 
     STRUCTURED_FIELDS = {
         "center": "Center",
+        "enterprise": "Enterprise",
         "module": "Module",
         "description": "Description",
         "issue": "Issue",
@@ -72,6 +76,11 @@ class EmailParser:
         body = self._extract_body(
             message.get("payload", {})
         )
+        body_html = self._find_body_by_mimetype(
+            message.get("payload", {}),
+            "text/html",
+        ) or ""
+        thread_messages = parse_thread(body)
 
         # Extract unquoted / new body (content written before any reply quotation markers)
         new_body, quoted_body = self._split_quoted_content(body)
@@ -79,12 +88,7 @@ class EmailParser:
         # Extract forwarded content
         forwarded = self._extract_forwarded_content(body)
 
-        classification_body = body
-        if forwarded["original_body"]:
-            classification_body = (
-                f"{body}\n\n"
-                f"{forwarded['original_body']}"
-            )
+        classification_body = build_ai_input(thread_messages)
 
         structured_fields = self._extract_structured_fields(
             classification_body
@@ -96,7 +100,11 @@ class EmailParser:
         )
 
         has_fresh_structured_fields = bool(
-            (unquoted_structured_fields.get("center") and unquoted_structured_fields.get("module"))
+            (
+                unquoted_structured_fields.get("center")
+                or unquoted_structured_fields.get("enterprise")
+            )
+            and unquoted_structured_fields.get("module")
             or unquoted_structured_fields.get("description")
             or unquoted_structured_fields.get("issue")
         )
@@ -113,8 +121,15 @@ class EmailParser:
             "sender_email": sender_email,
 
             "subject": header_map.get("subject", ""),
+            "to": header_map.get("to", ""),
+            "cc": header_map.get("cc", ""),
             "received_at": header_map.get("date", ""),
             "body": body,
+            "body_html": body_html,
+            "thread_messages": [asdict(item) for item in thread_messages],
+            "boilerplate_removed": any(
+                item.boilerplate_removed for item in thread_messages
+            ),
             "new_body": new_body,
             "quoted_body": quoted_body,
 
@@ -130,6 +145,7 @@ class EmailParser:
 
             # Structured support fields (global & unquoted)
             "center": structured_fields["center"],
+            "enterprise": structured_fields["enterprise"],
             "module": structured_fields["module"],
             "description": structured_fields["description"],
             "issue": structured_fields["issue"],

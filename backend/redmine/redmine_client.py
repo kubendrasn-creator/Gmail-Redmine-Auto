@@ -7,10 +7,13 @@ from backend.config.settings import (
     REDMINE_URL,
     REDMINE_PROJECT_ID,
     REDMINE_SUPPORT_TRACKER_ID,
+    REDMINE_FEEDBACK_TRACKER_ID,
     REDMINE_ASSIGNEE_ID,
-    REDMINE_CATEGORY_CUSTOM_FIELD_ID,
-    REDMINE_CATEGORY_VALUE,
+    REDMINE_CENTER_CUSTOM_FIELD_ID,
+    REDMINE_MODULE_CUSTOM_FIELD_ID,
+    REDMINE_MODULE_VALUE,
     REDMINE_ISSUES_CATEGORY,
+    REDMINE_TICKET_FIELD_DEFAULTS,
     REDMINE_MESSAGEID_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_VALUE,
@@ -20,6 +23,7 @@ from backend.config.settings import (
 )
 from backend.utils.logger import get_logger
 from backend.utils.retry import RedmineUploadError
+from backend.storage.review_metadata import ReviewMetadataStore
 
 logger = get_logger("redmine")
 
@@ -84,6 +88,39 @@ class RedmineClient:
         response.raise_for_status()
         return response.json()
 
+    def get_custom_fields(self):
+        store = ReviewMetadataStore()
+        cached = store.cached_metadata("custom_fields")
+        if cached is not None:
+            return cached
+        response = requests.get(
+            f"{self.base_url}/custom_fields.json",
+            headers=self.headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        value = response.json()
+        store.cache_metadata("custom_fields", value)
+        return value
+
+    def get_issue_priorities(self):
+        response = requests.get(
+            f"{self.base_url}/enumerations/issue_priorities.json",
+            headers=self.headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_user(self, user_id):
+        response = requests.get(
+            f"{self.base_url}/users/{int(user_id)}.json",
+            headers=self.headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+
     @staticmethod
     def _message_marker(message_id: str) -> str:
         safe_id = "".join(
@@ -100,6 +137,11 @@ class RedmineClient:
         subject,
         description,
         message_id=None,
+        ticket_type="support",
+        center=None,
+        assignee_id=None,
+        module=None,
+        classification_category=None,
     ):
         if message_id:
             marker = RedmineClient._message_marker(str(message_id))
@@ -117,25 +159,40 @@ class RedmineClient:
             else REDMINE_END_DATE
         )
 
+        tracker_id = (
+            REDMINE_FEEDBACK_TRACKER_ID
+            if ticket_type == "feedback" and REDMINE_FEEDBACK_TRACKER_ID
+            else REDMINE_SUPPORT_TRACKER_ID
+        )
         issue = {
             "project_id": project_id,
-            "tracker_id": REDMINE_SUPPORT_TRACKER_ID,
-            "assigned_to_id": REDMINE_ASSIGNEE_ID,
+            "tracker_id": tracker_id,
+            "assigned_to_id": assignee_id or REDMINE_ASSIGNEE_ID,
             "subject": subject,
             "description": description,
             "estimated_hours": REDMINE_ESTIMATED_HOURS,
             "start_date": start_date,
             "due_date": end_date,
         }
-
-        if REDMINE_ISSUES_CATEGORY:
-            issue["category_id"] = REDMINE_ISSUES_CATEGORY
+        ticket_defaults = REDMINE_TICKET_FIELD_DEFAULTS.get(
+            classification_category,
+            {},
+        )
+        category_id = ticket_defaults.get(
+            "category_id",
+            REDMINE_ISSUES_CATEGORY,
+        )
+        if category_id:
+            issue["category_id"] = category_id
 
         custom_fields = []
-        if REDMINE_CATEGORY_CUSTOM_FIELD_ID and REDMINE_CATEGORY_VALUE:
+        module_value = REDMINE_MODULE_VALUE
+        if classification_category == "center_creation":
+            module_value = module or ticket_defaults.get("module_value")
+        if REDMINE_MODULE_CUSTOM_FIELD_ID and module_value:
             custom_fields.append({
-                "id": REDMINE_CATEGORY_CUSTOM_FIELD_ID,
-                "value": REDMINE_CATEGORY_VALUE,
+                "id": REDMINE_MODULE_CUSTOM_FIELD_ID,
+                "value": module_value,
             })
         if REDMINE_SEVERITY_CUSTOM_FIELD_ID and REDMINE_SEVERITY_VALUE:
             custom_fields.append({
@@ -146,6 +203,11 @@ class RedmineClient:
             custom_fields.append({
                 "id": REDMINE_MESSAGEID_CUSTOM_FIELD_ID,
                 "value": str(message_id),
+            })
+        if center and REDMINE_CENTER_CUSTOM_FIELD_ID:
+            custom_fields.append({
+                "id": REDMINE_CENTER_CUSTOM_FIELD_ID,
+                "value": center,
             })
         if custom_fields:
             issue["custom_fields"] = custom_fields
@@ -158,6 +220,11 @@ class RedmineClient:
         subject,
         description,
         message_id=None,
+        ticket_type="support",
+        center=None,
+        assignee_id=None,
+        module=None,
+        classification_category=None,
     ):
         """
         Create a new Support issue in Redmine.
@@ -169,6 +236,11 @@ class RedmineClient:
             subject,
             description,
             message_id,
+            ticket_type=ticket_type,
+            center=center,
+            assignee_id=assignee_id,
+            module=module,
+            classification_category=classification_category,
         )
 
         if self.dry_run:

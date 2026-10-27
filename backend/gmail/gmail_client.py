@@ -2,6 +2,7 @@ from pathlib import Path
 import base64
 from datetime import datetime, timedelta, timezone
 import re
+from email.utils import parseaddr
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -11,7 +12,11 @@ from googleapiclient.discovery import build
 from backend.config.settings import (
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
+    SIGNATURE_IMAGE_MAX_KB,
+    SIGNATURE_NAME_PATTERNS,
+    SIGNATURE_REPEAT_THRESHOLD,
 )
+from backend.gmail.attachment_filter import AttachmentFilterStore, classify_attachment
 from backend.utils.logger import get_logger
 
 logger = get_logger("gmail")
@@ -33,6 +38,8 @@ class GmailClient:
     """
 
     def __init__(self):
+        self.last_filtered_attachments = []
+        self.attachment_filter = AttachmentFilterStore()
         self.service = self._authenticate()
 
     def _authenticate(self):
@@ -169,6 +176,15 @@ class GmailClient:
         )
 
         attachments = []
+        self.last_filtered_attachments = []
+        payload = raw_email.get("payload", {})
+        body_html = self._find_html_body(payload)
+        headers = {
+            entry.get("name", "").lower(): entry.get("value", "")
+            for entry in payload.get("headers", [])
+        }
+        sender = parseaddr(headers.get("from", ""))[1]
+        sender_domain = sender.rsplit("@", 1)[-1].lower() if "@" in sender else ""
 
         def process_part(part):
             filename = part.get("filename")
@@ -196,6 +212,57 @@ class GmailClient:
                 file_data = base64.urlsafe_b64decode(
                     data + "=" * (-len(data) % 4)
                 )
+                content_type = part.get("mimeType", "application/octet-stream")
+                part_headers = {
+                    entry.get("name", "").lower(): entry.get("value", "")
+                    for entry in part.get("headers", [])
+                }
+                content_id = part_headers.get("content-id", "").strip("<> ")
+                digest = self.attachment_filter.sha256(file_data)
+                metadata = {
+                    "filename": str(filename),
+                    "content_type": content_type,
+                    "content_id": content_id,
+                    "size": len(file_data),
+                    "sha256": digest,
+                }
+                if content_type.lower().startswith("image/"):
+                    if self.attachment_filter.ignored(digest):
+                        self.attachment_filter.record_hit(digest)
+                        self.last_filtered_attachments.append({
+                            **metadata,
+                            "reason": "hash-denylist",
+                        })
+                        return
+                    decision = classify_attachment(
+                        metadata,
+                        body_html,
+                        signature_image_max_kb=SIGNATURE_IMAGE_MAX_KB,
+                        signature_name_patterns=SIGNATURE_NAME_PATTERNS,
+                    )
+                    if not decision.keep:
+                        self.last_filtered_attachments.append({
+                            **metadata,
+                            "reason": decision.reason,
+                        })
+                        return
+                    if self.attachment_filter.record_image(
+                        digest,
+                        sender_domain,
+                        message_id,
+                        str(filename),
+                        len(file_data),
+                        SIGNATURE_REPEAT_THRESHOLD,
+                    ):
+                        logger.info(
+                            "Signature image automatically ignored after repeated occurrences (sha256=%s)",
+                            digest,
+                        )
+                        self.last_filtered_attachments.append({
+                            **metadata,
+                            "reason": "auto-repeat",
+                        })
+                        return
 
                 safe_name = Path(str(filename).replace("\\", "/")).name
                 safe_name = re.sub(r'[<>:"/\\|?*]', "_", safe_name).rstrip(" .")
@@ -218,17 +285,28 @@ class GmailClient:
                     {
                         "path": str(file_path),
                         "filename": file_path.name,
-                        "content_type": part.get(
-                            "mimeType",
-                            "application/octet-stream",
-                        ),
+                        "content_type": content_type,
+                        "sha256": digest,
                     }
                 )
 
             for child_part in part.get("parts", []):
                 process_part(child_part)
 
-        payload = raw_email.get("payload", {})
         process_part(payload)
 
         return attachments
+
+    def _find_html_body(self, part):
+        if part.get("mimeType") == "text/html":
+            data = part.get("body", {}).get("data")
+            if data:
+                decoded = base64.urlsafe_b64decode(
+                    data + "=" * (-len(data) % 4)
+                )
+                return decoded.decode("utf-8", errors="replace")
+        for child in part.get("parts", []):
+            found = self._find_html_body(child)
+            if found:
+                return found
+        return ""

@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import tempfile
 from typing import Callable
 
 import requests
@@ -30,6 +31,17 @@ from backend.utils.logger import get_logger
 from backend.processor.attachments import AttachmentPipeline
 from backend.utils.links import LinkDetector
 from backend.ticketing.ticket_classifier import decide
+from backend.storage.review_metadata import ReviewMetadataStore
+from backend.config.settings import REDMINE_CENTER_CUSTOM_FIELD_ID
+from backend.config.settings import (
+    ALLOWED_MODULES,
+    DEFAULT_ASSIGNEE_ID,
+    REDMINE_FEEDBACK_TRACKER_ID,
+    REDMINE_TICKET_FIELD_DEFAULTS,
+)
+from backend.ticketing.assignees import load_people
+from backend.ticketing.ticket_classifier import normalize_center
+from backend.ticketing.validation import missing_required_fields
 from backend.utils.retry import RedmineUploadError
 
 logger = get_logger("processor")
@@ -61,6 +73,7 @@ class TicketProcessor:
         self.confirmer: Confirmer = confirmer or CliConfirmer()
         self.attachment_pipeline = AttachmentPipeline()
         self.link_detector = LinkDetector()
+        self.review_metadata = ReviewMetadataStore()
 
     def process_message(self, message_id, email=None, interactive=True):
         """
@@ -130,7 +143,7 @@ class TicketProcessor:
             target_issue_id = duplicate_record["redmine_issue_id"]
         is_reply = bool(target_issue_id and (reply_match or thread_match))
         review_all = self.confirmer.review_all
-        if (is_reply or is_duplicate) and not review_all:
+        if is_reply or is_duplicate:
             classification = {
                 "is_ticket": True,
                 "ticket_type": "Support",
@@ -141,6 +154,17 @@ class TicketProcessor:
             }
         else:
             classification = self.classifier.classify(email)
+        usage = classification.get("token_usage")
+        if usage:
+            logger.info(
+                "Gemini usage for message %s: input=%s candidates=%s thoughts=%s tool_input=%s total=%s",
+                message_id,
+                usage.get("input_tokens", 0),
+                usage.get("output_tokens", 0),
+                usage.get("thinking_tokens", 0),
+                usage.get("tool_input_tokens", 0),
+                usage.get("total_tokens", 0),
+            )
         logger.info(
             f"Classification: is_ticket={classification['is_ticket']}, "
             f"type={classification['ticket_type']}"
@@ -183,6 +207,12 @@ class TicketProcessor:
             else:
                 decision = ReplyDecision(ReplyAction.CREATE_NEW)
             if decision.action == ReplyAction.ATTACH:
+                self._log_review_decision(
+                    message_id,
+                    draft,
+                    decision,
+                    include_fields=False,
+                )
                 return self._process_existing_thread(
                     email,
                     decision.issue_id or target_issue_id,
@@ -190,9 +220,11 @@ class TicketProcessor:
                     draft.get("downloaded_attachments"),
                 )
             if decision.action == ReplyAction.SKIP:
+                self._log_review_decision(message_id, draft, decision)
                 self._cleanup_review_attachments(draft)
                 return self._handle_skip(message_id, email, fingerprint)
             if decision.action == ReplyAction.REJECT:
+                self._log_review_decision(message_id, draft, decision)
                 self._cleanup_review_attachments(draft)
                 self._record_decision(
                     message_id,
@@ -217,15 +249,22 @@ class TicketProcessor:
                 decision.edited_subject,
                 decision.edited_description,
                 draft.get("downloaded_attachments"),
+                decision,
+                draft,
             )
 
         if interactive:
             result = self.confirmer.confirm_new_ticket(draft)
         else:
             result = ConfirmResult(ConfirmAction.APPROVE)
-
         if result.action in (ConfirmAction.APPROVE, ConfirmAction.EDIT):
             if result.attach_to_issue_id:
+                self._log_review_decision(
+                    message_id,
+                    draft,
+                    result,
+                    include_fields=False,
+                )
                 return self._process_existing_thread(
                     email,
                     result.attach_to_issue_id,
@@ -240,8 +279,11 @@ class TicketProcessor:
                 result.edited_subject,
                 result.edited_description,
                 draft.get("downloaded_attachments"),
+                result,
+                draft,
             )
         if result.action == ConfirmAction.REJECT:
+            self._log_review_decision(message_id, draft, result)
             status = "rejected" if review_all else (
                 "duplicate" if is_duplicate else "skipped_by_user"
             )
@@ -262,6 +304,7 @@ class TicketProcessor:
                 "subject": subject,
                 "redmine_issue_id": target_issue_id if is_duplicate else None,
             }
+        self._log_review_decision(message_id, draft, result)
         self._cleanup_review_attachments(draft)
         return self._handle_skip(message_id, email, fingerprint)
 
@@ -303,6 +346,25 @@ class TicketProcessor:
                 },
             ),
         }
+        center_value = classification.get("center_or_enterprise") or ""
+        ticket_defaults = REDMINE_TICKET_FIELD_DEFAULTS.get(
+            classification.get("category"),
+            {},
+        )
+        if ticket_defaults.get("module"):
+            classification["module"] = ticket_defaults["module"]
+        classification["ticket_field_defaults"] = ticket_defaults
+        center_list_values = self._center_list_values()
+        center_resolution = self.review_metadata.resolve_center(
+            center_value,
+            allowed_values=center_list_values,
+        )
+        classification["center_resolution"] = center_resolution
+        classification["known_centers"] = self.review_metadata.centers()
+        classification["center_list_values"] = center_list_values
+        classification["center_field_required"] = bool(
+            REDMINE_CENTER_CUSTOM_FIELD_ID
+        )
         if existing_issue_id and self.confirmer.review_all:
             try:
                 issue = self.redmine.get_issue(existing_issue_id)
@@ -323,6 +385,9 @@ class TicketProcessor:
         if self.confirmer.preview_attachments:
             try:
                 draft["downloaded_attachments"] = self._download_for_review(message_id)
+                draft["filtered_attachments"] = list(
+                    self.gmail.last_filtered_attachments
+                )
                 draft["attachment_plans"] = self.attachment_pipeline.plan_attachments(
                     [Path(attachment["path"]) for attachment in draft["downloaded_attachments"]]
                 )
@@ -332,9 +397,38 @@ class TicketProcessor:
                     message_id,
                 )
                 draft["downloaded_attachments"] = None
+                draft["filtered_attachments"] = []
                 draft["attachment_plans"] = []
                 draft["attachment_error"] = str(exc)
         return draft
+
+    def _center_list_values(self):
+        if not REDMINE_CENTER_CUSTOM_FIELD_ID:
+            return None
+        try:
+            fields = self.redmine.get_custom_fields().get("custom_fields", [])
+            field = next(
+                (
+                    value
+                    for value in fields
+                    if value.get("id") == REDMINE_CENTER_CUSTOM_FIELD_ID
+                ),
+                None,
+            )
+            if field and field.get("field_format") == "list":
+                values = field.get("possible_values")
+                if values:
+                    return [
+                        entry.get("value", "") if isinstance(entry, dict) else str(entry)
+                        for entry in values
+                    ]
+                logger.warning(
+                    "Redmine center field is list-type but its allowed values are unreadable"
+                )
+                return []
+        except Exception as exc:
+            logger.warning("Could not read Redmine center-field metadata: %s", exc)
+        return None
 
     def _download_for_review(self, message_id):
         safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", message_id)
@@ -400,6 +494,8 @@ class TicketProcessor:
         edited_subject=None,
         edited_description=None,
         downloaded_attachments=None,
+        confirmation=None,
+        review_draft=None,
     ):
         """
         Create a new Redmine ticket with two-phase state persistence.
@@ -422,12 +518,109 @@ class TicketProcessor:
                 "This support ticket was automatically created from an incoming email.\n\n"
                 "Please review the attached original email and validate the issue details before proceeding."
             )
+        ticket_type = (
+            getattr(confirmation, "ticket_type", None)
+            or classification.get("ticket_type")
+            or "support"
+        )
+        center = (
+            getattr(confirmation, "center", None)
+            if getattr(confirmation, "center", None) is not None
+            else classification.get("center_or_enterprise")
+        )
+        module = (
+            getattr(confirmation, "module", None)
+            if getattr(confirmation, "module", None) is not None
+            else classification.get("module")
+        )
+        assignee_id = (
+            getattr(confirmation, "assignee_id", None)
+            or classification.get("assignee_id")
+        )
+        missing_fields = missing_required_fields({
+            "subject": subject,
+            "description": description,
+            "ticket_type": ticket_type,
+            "center": center,
+            "module": module,
+            "assignee": assignee_id,
+        })
+        if missing_fields:
+            raise ValueError(
+                "Required ticket fields are missing: "
+                + ", ".join(missing_fields)
+            )
+        ticket_type = str(ticket_type).strip().lower()
+        center = normalize_center(center)
+        module = str(module or "").strip()
+        if ticket_type not in {"support", "feedback"}:
+            raise ValueError("Ticket type must be support or feedback")
+        if ticket_type == "feedback" and not REDMINE_FEEDBACK_TRACKER_ID:
+            raise ValueError("Feedback tracker is not configured")
+        if (
+            ALLOWED_MODULES
+            and module
+            and module not in ALLOWED_MODULES
+            and not (
+                classification.get("category") == "center_creation"
+                and module
+                == REDMINE_TICKET_FIELD_DEFAULTS["center_creation"]["module"]
+            )
+        ):
+            raise ValueError("Module is not in ALLOWED_MODULES")
+        if len(center) > 100:
+            raise ValueError("Center or enterprise must be at most 100 characters")
+        allowed_center_values = classification.get("center_list_values")
+        if (
+            center
+            and allowed_center_values is not None
+            and center not in allowed_center_values
+        ):
+            raise ValueError("Center is not an allowed Redmine list-field value")
+        people = load_people()
+        allowed_assignee_ids = set(people.values())
+        if DEFAULT_ASSIGNEE_ID:
+            allowed_assignee_ids.add(DEFAULT_ASSIGNEE_ID)
+        if assignee_id is not None and assignee_id not in allowed_assignee_ids:
+            raise ValueError("Assignee must be selected from the configured people mapping")
+        self._log_review_decision(
+            message_id,
+            review_draft or {
+                "classification": classification,
+                "subject": email.get("subject", "No Subject"),
+            },
+            confirmation or ConfirmResult(ConfirmAction.APPROVE),
+            final_values_override={
+                "subject": subject,
+                "description": description,
+                "ticket_type": ticket_type,
+                "center": center,
+                "module": module,
+                "assignee": assignee_id,
+            },
+        )
         thread_id = email.get("thread_id")
         rfc_message_id = email.get("rfc_message_id")
         in_reply_to = email.get("in_reply_to")
         references = email.get("references")
 
         if self.dry_run:
+            email.update({
+                "message_id": message_id,
+                "subject": subject,
+                "center_or_enterprise": center,
+                "ticket_type": ticket_type,
+                "assignee_name": classification.get("assignee_name"),
+            })
+            with tempfile.TemporaryDirectory() as temp_dir:
+                self.pdf_generator.generate(
+                    email,
+                    Path(temp_dir) / "preview.pdf",
+                    subject=subject,
+                    ticket_type=ticket_type,
+                    center=center,
+                    assignee=classification.get("assignee_name"),
+                )
             return {
                 "action": "ticket_preview",
                 "status": "preview",
@@ -439,6 +632,11 @@ class TicketProcessor:
                     subject,
                     description,
                     message_id,
+                    ticket_type=ticket_type,
+                    center=center,
+                    assignee_id=assignee_id,
+                    module=module,
+                    classification_category=classification.get("category"),
                 ),
                 "attachment_plans": [
                     self._attachment_plan_dict(plan)
@@ -456,6 +654,11 @@ class TicketProcessor:
             subject=subject,
             description=description,
             message_id=message_id,
+            ticket_type=ticket_type,
+            center=center,
+            assignee_id=assignee_id,
+            module=module,
+            classification_category=classification.get("category"),
         )
 
         issue = result.get("issue", {})
@@ -469,7 +672,7 @@ class TicketProcessor:
         self.processed_store.add(
             message_id=message_id,
             subject=subject,
-            ticket_type="Support",
+            ticket_type=ticket_type,
             status="ticket_created",
             redmine_issue_id=issue_id,
             thread_id=thread_id,
@@ -483,6 +686,17 @@ class TicketProcessor:
             content_fingerprint=fingerprint,
             issue_description=description,
         )
+        self.processed_store.update(
+            message_id,
+            center=center,
+            enterprise=classification.get("enterprise"),
+            module=module,
+            assignee_id=assignee_id,
+            assignee_name=classification.get("assignee_name"),
+            ticket_type=ticket_type,
+        )
+        if center:
+            self.review_metadata.add_center(center)
 
         # Step C: Complete post-creation tasks (PDF, attachments, final status)
         return self._complete_new_ticket_processing(
@@ -493,6 +707,106 @@ class TicketProcessor:
             downloaded_attachments=downloaded_attachments,
             description=description,
         )
+
+    def _log_review_decision(
+        self,
+        message_id,
+        draft,
+        decision,
+        *,
+        include_fields=True,
+        final_values_override=None,
+    ):
+        if self.dry_run:
+            return
+        classification = draft.get("classification", {})
+        action_value = getattr(decision.action, "value", str(decision.action))
+        action = {
+            "APPROVE": "APPROVE",
+            "EDIT": "EDIT",
+            "REJECT": "REJECT",
+            "SKIP": "SKIP",
+            "ATTACH": "APPROVE",
+            "CREATE_NEW": "EDIT",
+        }.get(action_value, "SKIP")
+        center = (
+            decision.center
+            if getattr(decision, "center", None) is not None
+            else classification.get("center_or_enterprise")
+        )
+        final_values = {
+            "subject": getattr(decision, "edited_subject", None)
+            or classification.get("suggested_subject")
+            or draft.get("subject"),
+            "description": getattr(decision, "edited_description", None)
+            or classification.get("suggested_description"),
+            "ticket_type": getattr(decision, "ticket_type", None)
+            or classification.get("ticket_type"),
+            "center": center,
+            "module": getattr(decision, "module", None)
+            if getattr(decision, "module", None) is not None
+            else classification.get("module"),
+            "assignee": getattr(decision, "assignee_id", None)
+            or classification.get("assignee_id"),
+        }
+        if final_values_override:
+            final_values.update(final_values_override)
+        ai_values = {
+            "subject": classification.get("suggested_subject"),
+            "description": classification.get("suggested_description"),
+            "ticket_type": classification.get("ticket_type"),
+            "center": classification.get("center_or_enterprise"),
+            "module": classification.get("module"),
+            "assignee": classification.get("assignee_id"),
+        }
+        center_status = None
+        if include_fields and action_value in {"APPROVE", "EDIT", "CREATE_NEW"}:
+            try:
+                center_status = self.review_metadata.resolve_center(
+                    final_values["center"],
+                    allowed_values=classification.get("center_list_values"),
+                ).get("status")
+            except Exception as exc:
+                logger.warning(
+                    "Could not resolve reviewed center for message %s: %s",
+                    message_id,
+                    exc,
+                )
+        statuses = {
+            "center": center_status,
+            "assignee": classification.get("assignee_status"),
+        }
+        fields = {
+            key: {
+                "ai": ai_values[key],
+                "final": final_values[key],
+                "source": statuses.get(key) or "ai",
+                "status": statuses.get(key),
+            }
+            for key in ai_values
+        } if include_fields and action_value in {
+            "APPROVE",
+            "EDIT",
+            "CREATE_NEW",
+        } else {}
+        try:
+            self.review_metadata.log_decision(
+                message_id,
+                draft.get("suggested_action"),
+                classification.get("category"),
+                classification.get("confidence"),
+                action,
+                fields,
+                ai_source=classification.get("source"),
+                model=classification.get("model"),
+                prompt_hash=classification.get("prompt_hash"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not write review edit log for message %s: %s",
+                message_id,
+                exc,
+            )
 
     def _complete_new_ticket_processing(
         self,
@@ -510,6 +824,17 @@ class TicketProcessor:
         subject = email.get("subject", "No Subject")
         thread_id = email.get("thread_id")
         record = self.processed_store.get(message_id) or {}
+        email["message_id"] = message_id
+        email["subject"] = record.get("subject") or subject
+        email["center_or_enterprise"] = record.get("center") or record.get(
+            "enterprise"
+        ) or email.get("center") or email.get("enterprise")
+        email["ticket_type"] = record.get("ticket_type")
+        email["assignee_name"] = record.get("assignee_name")
+        email["boilerplate_removed"] = email.get("boilerplate_removed") or bool(
+            record.get("boilerplate_removed")
+        )
+        email["filtered_attachments"] = record.get("filtered_attachments", [])
         if not description and issue_data:
             description = issue_data.get("description", "")
         if not description:
@@ -530,19 +855,69 @@ class TicketProcessor:
                     message_id,
                     attachment_dir,
                 )
+            if not record.get("attachments_processed"):
+                filtered_attachments = list(self.gmail.last_filtered_attachments)
+                record["filtered_attachments"] = filtered_attachments
+                email["filtered_attachments"] = filtered_attachments
+                self.processed_store.update(
+                    message_id,
+                    filtered_attachments=filtered_attachments,
+                )
             if downloaded_attachments is None:
                 downloaded_attachments = []
             attachment_names = [att["filename"] for att in downloaded_attachments]
             email["attachment_names"] = attachment_names
+            email["attachments"] = downloaded_attachments
+            preview_plans = self.attachment_pipeline.plan_attachments(
+                [Path(attachment["path"]) for attachment in downloaded_attachments]
+            )
 
             # 1. Generate and upload PDF
             GENERATED_EMAILS_DIR.mkdir(parents=True, exist_ok=True)
-            output_path = GENERATED_EMAILS_DIR / f"{issue_id}.pdf"
+            pdf_filename = self.review_metadata.filename(message_id)
+            if not pdf_filename:
+                pdf_filename = self.pdf_generator.filename(
+                    email,
+                    message_id,
+                    subject=email["subject"],
+                    center=email.get("center_or_enterprise"),
+                )
+                self.review_metadata.save_filename(message_id, pdf_filename)
+            self.processed_store.update(message_id, pdf_filename=pdf_filename)
+            output_path = GENERATED_EMAILS_DIR / pdf_filename
 
             if not record.get("pdf_attached"):
                 try:
-                    self.pdf_generator.generate(email, str(output_path))
-                    logger.info(f"Generated email PDF: {output_path}")
+                    attachment_statuses = [
+                        {
+                            "filename": plan.name,
+                            "content_type": next(
+                                (
+                                    item["content_type"]
+                                    for item in downloaded_attachments
+                                    if item["filename"] == plan.name
+                                ),
+                                "",
+                            ),
+                            "size": plan.original_size,
+                            "status": {
+                                "UPLOAD": "Attached",
+                                "COMPRESS": "Compressed",
+                                "SKIP": "Skipped",
+                            }[plan.action.value],
+                        }
+                        for plan in preview_plans
+                    ]
+                    self.pdf_generator.generate(
+                        email,
+                        output_path,
+                        subject=email["subject"],
+                        ticket_type=email.get("ticket_type"),
+                        center=email.get("center_or_enterprise"),
+                        assignee=email.get("assignee_name"),
+                        attachment_statuses=attachment_statuses,
+                    )
+                    logger.info("Generated email PDF '%s' for Redmine issue #%s", pdf_filename, issue_id)
 
                     token = self.redmine.upload_attachment(str(output_path))
                     pdf_attachment = {

@@ -69,6 +69,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .tag-row { display: flex; flex-wrap: wrap; gap: .35rem; }
 .action-tag { color: #214eaa; background: #e8efff; }
 .tag { color: #536178; background: #eef1f5; font-weight: 600; }
+.filtered-attachments { width: 100%; margin-top: .75rem; color: var(--muted); font-size: .82rem; }
+.filtered-attachments summary { cursor: pointer; font-weight: 700; }
+.filtered-attachments li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .3rem 0; }
 .detail-panel { padding: 1.3rem; min-width: 0; }
 .empty-state { display: grid; place-content: center; min-height: 55vh; text-align: center; color: var(--muted); }
 .empty-state h2 { color: var(--ink); }
@@ -79,6 +82,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .email-body, .payload-preview pre { max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f8fb; padding: .8rem; border-radius: .4rem; font: .84rem/1.55 Consolas, monospace; }
 mark { background: #ffe89a; color: inherit; padding: .05rem; }
 .review-form > label { display: grid; gap: .4rem; margin: 1rem 0; font-weight: 700; font-size: .85rem; }
+.review-form > .review-field { display: grid; gap: .4rem; margin: .8rem 0; font-size: .85rem; }
+.review-field select, .review-field input { width: 100%; padding: .55rem; border: 1px solid #cbd4e1; border-radius: .45rem; color: var(--ink); background: white; }
+.review-field select[multiple] { min-height: 5rem; }
+.field-marker { color: var(--muted); font-size: .74rem; font-weight: 700; text-transform: capitalize; }
 .review-form input:not([type=radio]), .review-form textarea { width: 100%; border: 1px solid #cbd4e1; border-radius: .45rem; padding: .65rem; color: var(--ink); background: white; }
 .review-form textarea { resize: vertical; line-height: 1.5; }
 .char-count { color: var(--muted); font-weight: 400; font-size: .75rem; }

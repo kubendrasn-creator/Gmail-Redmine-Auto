@@ -2,6 +2,13 @@ import concurrent.futures
 import uuid
 
 from backend.config.settings import REDMINE_PROJECT_ID
+from backend.config.settings import (
+    DEFAULT_ASSIGNEE_ID,
+    REDMINE_FEEDBACK_TRACKER_ID,
+    REDMINE_SUPPORT_TRACKER_ID,
+    REDMINE_CENTER_CUSTOM_FIELD_ID,
+    REDMINE_MODULE_CUSTOM_FIELD_ID,
+)
 from backend.processor.confirmation import (
     ConfirmAction,
     ConfirmResult,
@@ -60,6 +67,55 @@ class WebConfirmer:
                 "received_at": email.get("received_at", ""),
             },
             "classification": classification,
+            "prefill": {
+                "ticket_type": {
+                    "value": classification.get("ticket_type") or "support",
+                    "source": "ai",
+                    "status": "suggested",
+                },
+                "center": {
+                    "value": classification.get("center_or_enterprise") or "",
+                    "source": (
+                        "email_field"
+                        if email.get("center") or email.get("enterprise")
+                        else "ai"
+                    ),
+                    "status": (
+                        classification.get("center_resolution", {}).get("status")
+                        or ("missing" if not classification.get("center_or_enterprise") else "new")
+                    ),
+                    "suggestion": classification.get("center_resolution", {}).get("suggestion"),
+                },
+                "module": {
+                    "value": classification.get("module") or "",
+                    "source": "email_field" if email.get("module") else "ai",
+                    "status": "validated" if classification.get("module") else "missing",
+                },
+                "assignee": {
+                    "value": classification.get("assignee_id"),
+                    "name": classification.get("assignee_name") or "",
+                    "source": classification.get("assignee_source") or "default",
+                    "status": classification.get("assignee_status") or "suggested",
+                },
+            },
+            "field_options": {
+                "ticket_types": ["support", "feedback"],
+                "modules": classification.get("allowed_modules", []),
+                "centers": (
+                    classification.get("center_list_values")
+                    if classification.get("center_list_values") is not None
+                    else classification.get("known_centers", [])
+                ),
+                "center_is_list": classification.get("center_list_values") is not None,
+                "assignees": classification.get("people", {}),
+                "default_assignee_id": DEFAULT_ASSIGNEE_ID,
+                "support_tracker_id": REDMINE_SUPPORT_TRACKER_ID,
+                "feedback_tracker_id": REDMINE_FEEDBACK_TRACKER_ID,
+                "center_custom_field_id": REDMINE_CENTER_CUSTOM_FIELD_ID,
+                "module_custom_field_id": REDMINE_MODULE_CUSTOM_FIELD_ID,
+                "center_suggestion": classification.get("center_resolution", {}).get("suggestion"),
+                "center_field_required": classification.get("center_field_required", False),
+            },
             "existing_issue": draft.get("existing_issue"),
             "existing_issue_id": draft.get("existing_issue_id"),
             "attachment_plans": [
@@ -73,6 +129,7 @@ class WebConfirmer:
                 }
                 for plan in attachment_plans
             ],
+            "filtered_attachments": draft.get("filtered_attachments", []),
             "detected_links": draft.get("detected_links", []),
             "dry_run": self.dry_run,
             "is_reply_review": reply,
@@ -98,6 +155,11 @@ class WebConfirmer:
                     suggested_subject,
                     suggested_description,
                     draft.get("message_id"),
+                    ticket_type=classification.get("ticket_type") or "support",
+                    center=classification.get("center_or_enterprise"),
+                    assignee_id=classification.get("assignee_id"),
+                    module=classification.get("module"),
+                    classification_category=classification.get("category"),
                 )
             )
 

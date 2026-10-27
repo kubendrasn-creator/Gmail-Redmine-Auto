@@ -1,0 +1,7 @@
+patterns:
+  - "Email Confidentiality Notice"
+  - "intended for the sole use"
+  - "You received this message because you are subscribed to the Google Groups"
+  - "To unsubscribe from this group"
+  - "To view this discussion visit"
+  - "^Sent from my "

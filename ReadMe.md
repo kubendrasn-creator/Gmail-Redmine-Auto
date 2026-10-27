@@ -32,15 +32,10 @@ REDMINE_PROJECT_ID=1
 REDMINE_SUPPORT_TRACKER_ID=1
 REDMINE_ASSIGNEE_ID=1
 
-# Built-in Issue Category (Redmine's native category field)
-# Set this to the numeric category ID from your Redmine project.
-REDMINE_ISSUES_CATEGORY=1
-
 # Custom Fields (optional)
-REDMINE_CATEGORY_CUSTOM_FIELD_ID=1
-REDMINE_CATEGORY_VALUE=Support
 REDMINE_SEVERITY_CUSTOM_FIELD_ID=2
 REDMINE_SEVERITY_VALUE=Normal
+REDMINE_FEEDBACK_TRACKER_ID=4
 
 REDMINE_ESTIMATED_HOURS=0
 REDMINE_START_DATE=
@@ -54,8 +49,7 @@ GMAIL_ALLOWED_SENDERS=user1@example.com,user2@example.com
 # AI Classification Configuration (Optional but Recommended)
 GEMINI_API_KEY=your_gemini_api_key
 AI_MAX_INPUT_CHARS=12000
-# Optional comma-separated module names from your Redmine project. Leave blank to allow any.
-ALLOWED_MODULES=
+# Issue categories and modules are configured in env/config/ticket_fields.json.
 
 # Attachment Configuration
 REDMINE_MAX_ATTACHMENT_MB=10
@@ -210,11 +204,53 @@ The system uses Google's Gemini 3.1 Flash-Lite model for intelligent email class
 - **Provides reasoning** for classification decisions
 - **Falls back** to rule-based classification if AI fails
 
-`ALLOWED_MODULES` is an optional comma-separated allow-list of module names used by
-your project, for example `ALLOWED_MODULES=Admissions,Billing,Reporting`. Names are
-matched exactly (including case). If the classifier returns a module not in the list,
-the module is cleared and the email is marked as missing module information so it can
-be reviewed. Leave the setting empty to accept any extracted module.
+Module and issue-category mappings are editable in
+`env/config/ticket_fields.json`. Category names map to Redmine's built-in issue
+category IDs; module names are text values accepted by the configured module custom
+field. The module custom field has one field ID, configured as
+`module_custom_field_id`; text options do not have individual IDs. Keep module names
+in the `modules` list to validate classifier output, and set the
+`center_creation.category` and `center_creation.module` defaults as needed. Start
+from `env/config/ticket_fields.example.json`.
+
+### Ticket prefill and review metadata
+
+The classifier uses the center named in the email when available and otherwise uses
+the enterprise name as the customer/center value. Set
+`REDMINE_CENTER_CUSTOM_FIELD_ID` only when your Redmine project has a matching custom
+field. If the field is a list, its configured values are checked before submission.
+
+Assignee names are extracted from the email and resolved only through the local
+`env/config/people.json` name-to-Redmine-user-ID mapping (or the `PEOPLE` environment
+setting); the model does not choose Redmine user IDs. Edit that JSON file directly.
+Partial name matches are accepted only when they identify a single configured user;
+the matched configured name and user ID are used for assignment. `DEFAULT_ASSIGNEE_ID`
+or the existing `REDMINE_ASSIGNEE_ID` is used when no configured person can be resolved.
+
+`REQUIRED_FIELDS` is a comma-separated list from `subject`, `description`,
+`ticket_type`, `center`, `module`, and `assignee`. The default is
+`ticket_type`; unsupported names are rejected during configuration validation.
+Center and enterprise are optional when neither is present in the email.
+
+Center-creation requests are classified as `center_creation`. Their module and
+built-in category defaults come from `env/config/ticket_fields.json`.
+Feedback is available as a ticket type and uses the configured
+`REDMINE_FEEDBACK_TRACKER_ID` (set to tracker 4 in this environment).
+
+Review decisions and field corrections are kept locally in
+`data/database/review_metadata.sqlite3`. Subject and description text are omitted by
+default; `EDIT_LOG_STORE_TEXT=true` opts into storing those full values. Inspect
+recent edit rates, approval actions, new centers, fallback share, and common
+corrections with:
+
+```bash
+python -m backend.main --edit-stats --days 30
+```
+
+The review log is separate from the processed-message store and is best-effort; it
+does not determine whether an email was created, rejected, or already processed.
+Generated PDF filenames are stable per Gmail message. `PDF_DATE_SOURCE=received`
+uses the email's received time; the default `system` uses the generation time.
 
 Textile is a markup format (for example, for headings, links, and lists). The old
 `REDMINE_TEXT_FORMAT` setting was not read by the application and did not change
@@ -230,6 +266,11 @@ The system intelligently handles email attachments:
 - **Video compression**: Automatically compresses oversized videos using FFmpeg
 - **Skipped files**: Files that exceed limits are kept locally and noted in the ticket
 - **Streaming uploads**: Large files are streamed to avoid memory issues
+- **Signature images**: Small signature/logo images can be filtered by configured
+  filename patterns, inline content IDs, and repeat hash observations. Filtered
+  attachment details appear in review and the generated PDF. The CLI's
+  `--ignore-attachment` option adds the supplied file's SHA-256 to the local ignore
+  list.
 
 ## CLI Options
 

@@ -14,12 +14,17 @@ env/token.json
 # Ignore everything else in env folder
 env/*
 !env/.env.example
+!env/config/
+env/config/*
+!env/config/*.example.json
+!env/config/*.example.yaml
 
 # Logs & Temporary processing directories
 data/logs/*
 !data/logs/.gitkeep
 data/database/*.sqlite3
 data/database/*.sqlite3-*
+data/database/processed_messages.json
 email_data/generated_emails/*
 !email_data/generated_emails/.gitkeep
 email_data/email_attachments/*

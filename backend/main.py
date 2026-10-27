@@ -1,5 +1,7 @@
 import argparse
+import hashlib
 import sys
+from pathlib import Path
 
 from backend.config.settings import (
     GMAIL_ALLOWED_SENDERS,
@@ -14,6 +16,8 @@ from backend.utils.preflight import PreflightValidator
 from backend.processor.ticket_processor import TicketProcessor
 from backend.storage.processed_messages import ProcessedMessageStore
 from backend.utils.logger import get_logger
+from backend.gmail.attachment_filter import AttachmentFilterStore
+from backend.storage.review_metadata import ReviewMetadataStore
 
 logger = get_logger("main")
 
@@ -73,11 +77,68 @@ def main():
         help="Do not open a browser automatically",
     )
     parser.add_argument(
+        "--ignore-attachment",
+        type=Path,
+        default=None,
+        help="Add an attachment SHA-256 to the local ignore list",
+    )
+    parser.add_argument(
+        "--edit-stats",
+        action="store_true",
+        help="Print recent human-review edit statistics",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Day window for --edit-stats (default: 30)",
+    )
+    parser.add_argument(
         "--auto-run",
         action="store_true",
         help="Fetch emails immediately after the local UI starts",
     )
     args = parser.parse_args()
+
+    if args.ignore_attachment:
+        if not args.ignore_attachment.is_file():
+            parser.error(f"Attachment file not found: {args.ignore_attachment}")
+        digest = hashlib.sha256(args.ignore_attachment.read_bytes()).hexdigest()
+        AttachmentFilterStore().ignore(
+            digest,
+            filename=args.ignore_attachment.name,
+            size=args.ignore_attachment.stat().st_size,
+            reason="manual",
+        )
+        print(f"Ignored attachment SHA-256: {digest}")
+        return
+
+    if args.edit_stats:
+        if args.days < 1:
+            parser.error("--days must be at least 1")
+        report = ReviewMetadataStore().edit_stats(args.days)
+        print(f"Review edit statistics (last {args.days} days)")
+        print("Field                Total  Unchanged  Changed")
+        for field_name, total, unchanged, changed in report["fields"]:
+            unchanged_pct = 100 * unchanged / total if total else 0
+            changed_pct = 100 * changed / total if total else 0
+            print(
+                f"{field_name:<20} {total:>5}  "
+                f"{unchanged_pct:>8.1f}%  {changed_pct:>7.1f}%"
+            )
+        print("Human actions:", report["actions"])
+        print("Centers marked new:", report["new_centers"])
+        print(f"AI fallback share: {report['fallback_share']:.1%}")
+        print("Top corrections:")
+        if report["top_corrections"]:
+            for field_name, ai_value, final_value, frequency in report["top_corrections"]:
+                print(
+                    f"  {field_name}: {ai_value} -> {final_value} "
+                    f"({frequency} times)"
+                )
+        else:
+            print("  None recorded")
+        return
 
     # Override config if flags provided
     lookback_hours = args.lookback_hours if args.lookback_hours is not None else GMAIL_LOOKBACK_HOURS
@@ -283,4 +344,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted. Exiting.")

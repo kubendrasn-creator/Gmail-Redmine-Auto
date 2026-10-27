@@ -18,6 +18,10 @@ class ConfirmResult:
     edited_subject: str | None = None
     edited_description: str | None = None
     attach_to_issue_id: int | None = None
+    ticket_type: str | None = None
+    center: str | None = None
+    module: str | None = None
+    assignee_id: int | None = None
 
 
 class ReplyAction(str, Enum):
@@ -33,6 +37,10 @@ class ReplyDecision:
     issue_id: int | None = None
     edited_subject: str | None = None
     edited_description: str | None = None
+    ticket_type: str | None = None
+    center: str | None = None
+    module: str | None = None
+    assignee_id: int | None = None
 
 
 class Confirmer(Protocol):
@@ -77,11 +85,71 @@ class CliConfirmer:
         print("New ticket detected.")
         print(f"Subject: {subject}")
         print(f"Sender: {draft.get('sender_email', '')}")
+        classification = draft.get("classification", {})
+        print(
+            "Suggested fields: "
+            f"type={classification.get('ticket_type') or 'support'}, "
+            f"center/enterprise={classification.get('center_or_enterprise') or '(missing)'}, "
+            f"module={classification.get('module') or '(missing)'}, "
+            f"assignee={classification.get('assignee_name') or classification.get('assignee_id') or '(default)'}"
+        )
+        resolution = classification.get("center_resolution", {})
+        if resolution.get("suggestion"):
+            print(f"Suggested known center: {resolution['suggestion']}")
         print()
         if not ask_yes_no("Create Redmine ticket for this email?"):
             return ConfirmResult(ConfirmAction.SKIP)
+        ticket_type = self._ask_value(
+            "Ticket type (support/feedback)",
+            classification.get("ticket_type") or "support",
+        )
+        center = self._ask_value(
+            "Center / enterprise",
+            classification.get("center_or_enterprise") or "",
+        )
+        module = self._ask_value("Module", classification.get("module") or "")
+        people = classification.get("people", {})
+        default_assignee_id = classification.get("default_assignee_id") or classification.get("assignee_id")
+        assignee_options = ", ".join(
+            f"{name}={user_id}" for name, user_id in people.items()
+        )
+        if assignee_options:
+            print(f"Configured assignees: {assignee_options}")
+        assignee_value = self._ask_value(
+            "Assignee Redmine user ID",
+            classification.get("assignee_id") or default_assignee_id or "",
+        )
+        try:
+            assignee_id = int(assignee_value) if str(assignee_value).strip() else None
+        except ValueError:
+            print("Assignee must be a Redmine user ID; using the configured default.")
+            assignee_id = default_assignee_id
+        final_subject = self._ask_value(
+            "Final subject",
+            classification.get("suggested_subject") or subject,
+        )
+        final_description = self._ask_value(
+            "Final description (leave blank to keep suggested)",
+            classification.get("suggested_description") or "",
+        )
         print("Creating Redmine ticket...")
-        return ConfirmResult(ConfirmAction.APPROVE)
+        return ConfirmResult(
+            ConfirmAction.EDIT,
+            edited_subject=final_subject,
+            edited_description=final_description or classification.get("suggested_description"),
+            ticket_type=ticket_type,
+            center=center,
+            module=module,
+            assignee_id=assignee_id,
+        )
+
+    @staticmethod
+    def _ask_value(label, default):
+        try:
+            value = input(f"{label} [{default}]: ").strip()
+        except EOFError:
+            return str(default)
+        return value or str(default)
 
     def confirm_reply_attach(self, draft: dict) -> ReplyDecision:
         message_id = draft.get("message_id", "")

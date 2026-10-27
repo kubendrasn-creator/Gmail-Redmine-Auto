@@ -3,9 +3,55 @@ import concurrent.futures
 import logging
 import secrets
 import threading
-from concurrent.futures import InvalidStateError
+from concurrent.futures import Future, InvalidStateError
 
 from backend.web.queue_store import PendingItemStore
+
+
+class _DaemonExecutor(concurrent.futures.Executor):
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._shutdown = False
+        self._threads = set()
+        self._futures = set()
+
+    def submit(self, fn, /, *args, **kwargs):
+        future = Future()
+        with self._lock:
+            if self._shutdown:
+                raise RuntimeError("Cannot schedule new futures after shutdown")
+            self._futures.add(future)
+
+            def run():
+                try:
+                    if future.set_running_or_notify_cancel():
+                        future.set_result(fn(*args, **kwargs))
+                except BaseException as exc:
+                    future.set_exception(exc)
+                finally:
+                    with self._lock:
+                        self._threads.discard(threading.current_thread())
+                        self._futures.discard(future)
+
+            thread = threading.Thread(
+                target=run,
+                name="gmail-redmine-worker",
+                daemon=True,
+            )
+            self._threads.add(thread)
+            thread.start()
+        return future
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        with self._lock:
+            self._shutdown = True
+            threads = tuple(self._threads)
+            futures = tuple(self._futures) if cancel_futures else ()
+        for future in futures:
+            future.cancel()
+        if wait:
+            for thread in threads:
+                thread.join()
 
 
 class AppState:
@@ -42,10 +88,7 @@ class AppState:
         self.items = {}
         self.futures = {}
         self.subscribers = set()
-        self.worker_executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix="gmail-redmine-worker",
-        )
+        self.worker_executor = _DaemonExecutor()
         self.worker_future = None
         self.log_handler = None
 
@@ -135,6 +178,6 @@ class AppState:
                     )
                 except InvalidStateError:
                     pass
-        self.worker_executor.shutdown(wait=True, cancel_futures=True)
+        self.worker_executor.shutdown(wait=False, cancel_futures=True)
         if self.log_handler is not None:
             logging.getLogger("gmail_redmine").removeHandler(self.log_handler)

@@ -155,12 +155,147 @@
     descriptionInput.addEventListener("input", updatePreview);
 
     const classification = item.classification || {};
+    const fieldOptions = item.field_options || {};
+    const prefill = item.prefill || {};
+    const reviewFields = {};
+    function selectField(labelText, name, options, value, multiple = false) {
+      const label = node("label", undefined, "review-field");
+      label.append(node("span", `${labelText} · ${prefill[name]?.status || "suggested"}`, "field-marker"));
+      const select = document.createElement("select");
+      select.name = name;
+      select.multiple = multiple;
+      if (!multiple) {
+        const empty = node("option", "—");
+        empty.value = "";
+        select.append(empty);
+      }
+      for (const option of options) {
+        const entry = node("option", option.label);
+        entry.value = String(option.value);
+        entry.selected = multiple
+          ? (value || []).map(String).includes(entry.value)
+          : String(value ?? "") === entry.value;
+        select.append(entry);
+      }
+      label.append(select);
+      reviewFields[name] = select;
+      return label;
+    }
+
+    const ticketTypes = selectField(
+      "Ticket type",
+      "ticket_type",
+      (fieldOptions.ticket_types || ["support", "feedback"]).map((value) => ({
+        label: value,
+        value,
+      })),
+      prefill.ticket_type?.value || "support",
+    );
+    form.append(ticketTypes);
+
+    const centerLabel = node("label", undefined, "review-field");
+    centerLabel.append(node(
+      "span",
+      `Center / enterprise · ${prefill.center?.status || "missing"}`,
+      "field-marker",
+    ));
+    const centerInput = document.createElement(fieldOptions.center_is_list ? "select" : "input");
+    centerInput.name = "center";
+    if (fieldOptions.center_is_list) {
+      const emptyCenter = node("option", "Select a Redmine center");
+      emptyCenter.value = "";
+      centerInput.append(emptyCenter);
+      for (const center of fieldOptions.centers || []) {
+        const option = node("option", center);
+        option.value = center;
+        centerInput.append(option);
+      }
+      centerInput.value = (fieldOptions.centers || []).includes(prefill.center?.value)
+        ? prefill.center.value
+        : "";
+    } else {
+      centerInput.maxLength = 100;
+      centerInput.value = prefill.center?.value || "";
+    }
+    const centerChildren = [centerInput];
+    if (!fieldOptions.center_is_list) {
+      centerInput.setAttribute("list", `center-options-${item.id}`);
+      const centerList = node("datalist");
+      centerList.id = `center-options-${item.id}`;
+      for (const center of fieldOptions.centers || []) {
+        const option = document.createElement("option");
+        option.value = center;
+        centerList.append(option);
+      }
+      centerChildren.push(centerList);
+    }
+    centerLabel.append(...centerChildren);
+    if (fieldOptions.center_is_list && !(fieldOptions.centers || []).length) {
+      centerLabel.append(node(
+        "span",
+        "Redmine center choices could not be loaded. Verify the configured custom-field ID and permissions.",
+        "notice",
+      ));
+    }
+    if (fieldOptions.center_suggestion) {
+      const hint = node("span", `Did you mean ${fieldOptions.center_suggestion}?`, "notice");
+      const useSuggested = node("button", "Use suggestion", "secondary");
+      useSuggested.type = "button";
+      useSuggested.addEventListener("click", () => {
+        centerInput.value = fieldOptions.center_suggestion;
+        updatePreview();
+      });
+      centerLabel.append(hint, useSuggested);
+    }
+    reviewFields.center = centerInput;
+    form.append(centerLabel);
+
+    const moduleChoices = [...new Set([
+      ...(fieldOptions.modules || []),
+      ...(prefill.module?.value ? [prefill.module.value] : []),
+    ])].map((value) => ({ label: value, value }));
+    if ((fieldOptions.modules || []).length) {
+      form.append(selectField("Module", "module", moduleChoices, prefill.module?.value || ""));
+    } else {
+      const moduleLabel = node("label", undefined, "review-field");
+      moduleLabel.append(node(
+        "span",
+        `Module · ${prefill.module?.status || "missing"}`,
+        "field-marker",
+      ));
+      const moduleInput = document.createElement("input");
+      moduleInput.name = "module";
+      moduleInput.maxLength = 100;
+      moduleInput.value = prefill.module?.value || "";
+      moduleLabel.append(moduleInput);
+      form.append(moduleLabel);
+      reviewFields.module = moduleInput;
+    }
+    const people = fieldOptions.assignees || {};
+    const assigneeOptions = Object.entries(people).map(([name, userId]) => ({
+      label: `${name} (${userId})`,
+      value: userId,
+    }));
+    const defaultAssignee = fieldOptions.default_assignee_id || "";
+    if (defaultAssignee) {
+      assigneeOptions.unshift({ label: `Default (${defaultAssignee})`, value: defaultAssignee });
+    }
+    form.append(selectField(
+      "Assignee",
+      "assignee",
+      assigneeOptions,
+      prefill.assignee?.value || defaultAssignee,
+    ));
     const classificationPanel = node("section", undefined, "detail-section classification");
     classificationPanel.append(node("h3", "Classification"));
     const facts = node("dl", undefined, "facts");
     for (const [label, value] of [
       ["Suggested action", item.suggested_action],
       ["Category", classification.category || item.category || "—"],
+      ["Detected center", classification.center || "Not found"],
+      ["Detected enterprise", classification.enterprise || "Not found"],
+      ["Assignee suggestion", classification.assignee_name || classification.assignee_note || "Default"],
+      ["Assignee source", `${classification.assignee_source || "default"} · ${classification.assignee_status || "suggested"}`],
       ["Confidence", typeof classification.confidence === "number" ? `${Math.round(classification.confidence * 100)}%` : "—"],
       ["Gemini tokens", classification.token_usage
         ? `Input ${formatCount(classification.token_usage.input_tokens)} · Output/completion ${formatCount(classification.token_usage.output_tokens)} · Thinking ${formatCount(classification.token_usage.thinking_tokens)} · Tool input ${formatCount(classification.token_usage.tool_input_tokens)} · Total ${formatCount(classification.token_usage.total_tokens)}`
@@ -196,6 +331,37 @@
       attachmentSection.append(table);
     } else {
       attachmentSection.append(node("p", "No file attachments detected.", "muted"));
+    }
+    if ((item.filtered_attachments || []).length) {
+      const filtered = node("details", undefined, "filtered-attachments");
+      filtered.append(node("summary", `Filtered (${item.filtered_attachments.length})`));
+      const list = node("ul");
+      for (const attachment of item.filtered_attachments) {
+        const row = node("li");
+        row.append(node("span", `${attachment.filename} · ${attachment.reason} `));
+        const ignore = node("button", "Ignore forever", "secondary");
+        ignore.type = "button";
+        ignore.addEventListener("click", async () => {
+          try {
+            await api("/api/attachments/ignore", {
+              method: "POST",
+              body: JSON.stringify({
+                sha256: attachment.sha256,
+                filename: attachment.filename,
+                size: attachment.size,
+              }),
+            });
+            ignore.disabled = true;
+            ignore.textContent = "Ignored forever";
+          } catch (error) {
+            showError(error);
+          }
+        });
+        row.append(ignore);
+        list.append(row);
+      }
+      filtered.append(list);
+      attachmentSection.append(filtered);
     }
     form.append(attachmentSection);
 
@@ -289,10 +455,14 @@
     const actions = node("div", undefined, "action-row");
     const approve = node("button", item.dry_run ? "Preview" : "Approve", "primary");
     approve.type = "submit";
-    approve.disabled = !subjectInput.value.trim() || item.status !== "PENDING";
-    subjectInput.addEventListener("input", () => {
-      approve.disabled = !subjectInput.value.trim() || item.status !== "PENDING";
-    });
+    const updateApproveState = () => {
+      approve.disabled = (
+        !subjectInput.value.trim()
+        || item.status !== "PENDING"
+      );
+    };
+    updateApproveState();
+    subjectInput.addEventListener("input", updateApproveState);
     const reject = node("button", "Reject", "danger");
     reject.type = "button";
     reject.disabled = item.status !== "PENDING";
@@ -318,6 +488,10 @@
             subject: subjectInput.value,
             description: descriptionInput.value,
             attach_to_issue_id: issueId,
+            ticket_type: reviewFields.ticket_type.value || "support",
+            center: centerInput.value.trim(),
+            module: reviewFields.module.value || "",
+            assignee_id: Number(reviewFields.assignee.value) || null,
           }),
         });
         updateLocalStatus(item.id, response.status);
@@ -337,6 +511,30 @@
       const current = JSON.parse(JSON.stringify(base));
       if (current.issue) {
         current.issue.subject = subjectInput.value;
+        const selectedType = reviewFields.ticket_type.value || "support";
+        current.issue.tracker_id = selectedType === "feedback"
+          ? fieldOptions.feedback_tracker_id
+          : fieldOptions.support_tracker_id;
+        current.issue.assigned_to_id = Number(reviewFields.assignee.value) || null;
+        const centerFieldId = Number(fieldOptions.center_custom_field_id) || 0;
+        if (centerFieldId) {
+          const customFields = (current.issue.custom_fields || [])
+            .filter((field) => Number(field.id) !== centerFieldId);
+          customFields.push({ id: centerFieldId, value: centerInput.value.trim() });
+          current.issue.custom_fields = customFields;
+        }
+        if (classification.category === "center_creation") {
+          const moduleFieldId = Number(fieldOptions.module_custom_field_id) || 0;
+          if (moduleFieldId) {
+            const customFields = (current.issue.custom_fields || [])
+              .filter((field) => Number(field.id) !== moduleFieldId);
+            customFields.push({
+              id: moduleFieldId,
+              value: reviewFields.module.value || "",
+            });
+            current.issue.custom_fields = customFields;
+          }
+        }
         const marker = String(current.issue.description || "").match(
           /<!-- gmail-message-id: [A-Za-z0-9_-]+ -->/
         );

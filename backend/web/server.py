@@ -16,12 +16,19 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.config.settings import (
+    ALLOWED_MODULES,
+    DEFAULT_ASSIGNEE_ID,
     REDMINE_MAX_ATTACHMENT_MB,
     REDMINE_URL,
+    REDMINE_FEEDBACK_TRACKER_ID,
+    REDMINE_TICKET_FIELD_DEFAULTS,
     VIDEO_COMPRESSION_ENABLED,
     WEB_AUTO_OPEN_BROWSER,
     WEB_PORT,
 )
+from backend.gmail.attachment_filter import AttachmentFilterStore
+from backend.ticketing.assignees import load_people
+from backend.ticketing.validation import missing_required_fields
 from backend.processor.confirmation import (
     ConfirmAction,
     ConfirmResult,
@@ -51,6 +58,10 @@ class ApproveRequest(StrictRequest):
     subject: str = Field(min_length=1, max_length=255)
     description: str = Field(max_length=50_000)
     attach_to_issue_id: int | None = Field(default=None, ge=1)
+    ticket_type: str = Field(default="support")
+    center: str = Field(default="", max_length=100)
+    module: str = Field(default="", max_length=100)
+    assignee_id: int | None = Field(default=None, ge=1)
 
     @field_validator("subject")
     @classmethod
@@ -59,6 +70,12 @@ class ApproveRequest(StrictRequest):
         if not value:
             raise ValueError("Subject cannot be blank")
         return value
+
+
+class IgnoreAttachmentRequest(StrictRequest):
+    sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
+    filename: str = Field(default="", max_length=255)
+    size: int = Field(default=0, ge=0)
 
 
 def _safe_text(value):
@@ -442,6 +459,49 @@ def create_app(state: AppState | None = None) -> FastAPI:
     @app.post("/api/item/{item_id}/approve")
     async def approve_item(item_id: str, payload: ApproveRequest):
         item = require_item(item_id)
+        missing_fields = missing_required_fields({
+            "subject": payload.subject,
+            "description": payload.description,
+            "ticket_type": payload.ticket_type,
+            "center": payload.center,
+            "module": payload.module,
+            "assignee": payload.assignee_id,
+        })
+        if missing_fields:
+            raise HTTPException(
+                status_code=422,
+                detail="Required ticket fields are missing: "
+                + ", ".join(missing_fields),
+            )
+        if payload.ticket_type not in {"support", "feedback"}:
+            raise HTTPException(status_code=422, detail="Ticket type must be support or feedback")
+        if payload.ticket_type == "feedback" and not REDMINE_FEEDBACK_TRACKER_ID:
+            raise HTTPException(status_code=422, detail="Feedback tracker is not configured")
+        classification = item.get("classification", {})
+        if (
+            ALLOWED_MODULES
+            and payload.module
+            and payload.module not in ALLOWED_MODULES
+            and not (
+                classification.get("category") == "center_creation"
+                and payload.module
+                == REDMINE_TICKET_FIELD_DEFAULTS["center_creation"]["module"]
+            )
+        ):
+            raise HTTPException(status_code=422, detail="Select an allowed module")
+        people = load_people()
+        allowed_assignees = set(people.values())
+        if DEFAULT_ASSIGNEE_ID:
+            allowed_assignees.add(DEFAULT_ASSIGNEE_ID)
+        if payload.assignee_id is not None and payload.assignee_id not in allowed_assignees:
+            raise HTTPException(status_code=422, detail="Select an assignee from the configured people mapping")
+        allowed_center_values = classification.get("center_list_values")
+        if (
+            payload.center
+            and allowed_center_values is not None
+            and payload.center not in allowed_center_values
+        ):
+            raise HTTPException(status_code=422, detail="Select a valid Redmine center value")
         if item.get("is_reply_review"):
             decision = (
                 ReplyDecision(
@@ -453,18 +513,30 @@ def create_app(state: AppState | None = None) -> FastAPI:
                     ReplyAction.CREATE_NEW,
                     edited_subject=payload.subject,
                     edited_description=payload.description,
+                    ticket_type=payload.ticket_type,
+                    center=payload.center,
+                    module=payload.module,
+                    assignee_id=payload.assignee_id,
                 )
             )
         else:
             edited = (
                 payload.subject != item.get("suggested_subject")
                 or payload.description != item.get("suggested_description")
+                or payload.ticket_type != classification.get("ticket_type", "support")
+                or payload.center != classification.get("center_or_enterprise", "")
+                or payload.module != (classification.get("module") or "")
+                or payload.assignee_id != classification.get("assignee_id")
             )
             decision = ConfirmResult(
                 ConfirmAction.EDIT if edited else ConfirmAction.APPROVE,
                 edited_subject=payload.subject,
                 edited_description=payload.description,
                 attach_to_issue_id=payload.attach_to_issue_id,
+                ticket_type=payload.ticket_type,
+                center=payload.center,
+                module=payload.module,
+                assignee_id=payload.assignee_id,
             )
         return resolve_item(item_id, decision, "APPROVED")
 
@@ -526,6 +598,16 @@ def create_app(state: AppState | None = None) -> FastAPI:
         if getattr(app.state, "uvicorn_server", None):
             app.state.uvicorn_server.should_exit = True
         return {"state": "SHUTTING_DOWN"}
+
+    @app.post("/api/attachments/ignore")
+    async def ignore_attachment(payload: IgnoreAttachmentRequest):
+        AttachmentFilterStore().ignore(
+            payload.sha256,
+            filename=payload.filename,
+            size=payload.size,
+            reason="manual",
+        )
+        return {"sha256": payload.sha256.lower(), "ignored": True}
 
     return app
 
@@ -618,8 +700,12 @@ def run_server(
         server_thread.join()
     except KeyboardInterrupt:
         logger.info("Shutting down local review UI")
-        state.close()
         server.should_exit = True
+        state.close()
         server_thread.join(timeout=10)
+        if server_thread.is_alive():
+            logger.warning("Local review UI did not stop gracefully; forcing shutdown")
+            server.force_exit = True
+            server_thread.join(timeout=2)
     finally:
         state.close()

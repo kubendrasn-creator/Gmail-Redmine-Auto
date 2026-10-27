@@ -16,8 +16,12 @@ from backend.config.settings import (
     GENERATED_EMAILS_DIR,
     REDMINE_API_KEY,
     REDMINE_ASSIGNEE_ID,
-    REDMINE_CATEGORY_CUSTOM_FIELD_ID,
-    REDMINE_CATEGORY_VALUE,
+    DEFAULT_ASSIGNEE_ID,
+    PEOPLE,
+    PEOPLE_FILE,
+    REDMINE_CENTER_CUSTOM_FIELD_ID,
+    REDMINE_MODULE_CUSTOM_FIELD_ID,
+    REDMINE_MODULE_VALUE,
     REDMINE_ISSUES_CATEGORY,
     REDMINE_MAX_ATTACHMENT_MB,
     REDMINE_PROJECT_ID,
@@ -60,29 +64,23 @@ class PreflightValidator:
         """
         Run all preflight checks and return results.
         """
-        self.checks = []
-
-        # Redmine checks
-        self._check_redmine_reachable()
-        self._check_redmine_api_key()
-        self._check_redmine_project_exists()
-        self._check_redmine_tracker_enabled()
-        self._check_redmine_assignee_exists()
-        self._check_redmine_category_exists()
-        self._check_redmine_custom_fields()
-
-        # Gmail checks
-        self._check_gmail_token()
-        self._check_gmail_scope()
-
-        # AI checks
-        self._check_gemini_key()
-
-        # System checks
-        self._check_ffmpeg_available()
-        self._check_attachment_size_config()
-        self._check_writable_directories()
-
+        self.checks = [
+            self._check_redmine_reachable(),
+            self._check_redmine_api_key(),
+            self._check_redmine_project_exists(),
+            self._check_redmine_tracker_enabled(),
+            self._check_redmine_assignee_exists(),
+            self._check_redmine_category_exists(),
+            self._check_redmine_custom_fields(),
+            self._check_assignee_configuration(),
+            self._check_center_field_metadata(),
+            self._check_gmail_token(),
+            self._check_gmail_scope(),
+            self._check_gemini_key(),
+            self._check_ffmpeg_available(),
+            self._check_attachment_size_config(),
+            self._check_writable_directories(),
+        ]
         return self.checks
 
     def print_report(self):
@@ -247,8 +245,8 @@ class PreflightValidator:
         """Check if custom field IDs are configured."""
         issues = []
 
-        if REDMINE_CATEGORY_CUSTOM_FIELD_ID and not REDMINE_CATEGORY_VALUE:
-            issues.append("Category ID set but value missing")
+        if REDMINE_MODULE_CUSTOM_FIELD_ID and not REDMINE_MODULE_VALUE:
+            issues.append("Module custom field ID set but module value missing")
 
         if REDMINE_SEVERITY_CUSTOM_FIELD_ID and not REDMINE_SEVERITY_VALUE:
             issues.append("Severity ID set but value missing")
@@ -265,6 +263,80 @@ class PreflightValidator:
             status=CheckStatus.OK,
             message="Custom fields properly configured or not set",
         )
+
+    def _check_assignee_configuration(self) -> CheckResult:
+        if not PEOPLE and (not PEOPLE_FILE.exists() or not PEOPLE_FILE.stat().st_size):
+            return CheckResult(
+                name="Assignee name mapping",
+                status=CheckStatus.WARN,
+                message=f"No assignee mapping found in {PEOPLE_FILE} or PEOPLE",
+            )
+        if not DEFAULT_ASSIGNEE_ID:
+            return CheckResult(
+                name="Default Redmine assignee",
+                status=CheckStatus.WARN,
+                message="No default assignee configured",
+            )
+        try:
+            RedmineClient().get_user(DEFAULT_ASSIGNEE_ID)
+            return CheckResult(
+                name="Default Redmine assignee",
+                status=CheckStatus.OK,
+                message=f"Redmine user {DEFAULT_ASSIGNEE_ID} exists",
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Default Redmine assignee",
+                status=CheckStatus.FAIL,
+                message=f"Redmine user {DEFAULT_ASSIGNEE_ID} could not be verified: {exc}",
+            )
+
+    def _check_center_field_metadata(self) -> CheckResult:
+        if not REDMINE_CENTER_CUSTOM_FIELD_ID:
+            return CheckResult(
+                name="Redmine center field",
+                status=CheckStatus.WARN,
+                message="REDMINE_CENTER_CUSTOM_FIELD_ID is not set",
+            )
+        try:
+            fields = RedmineClient().get_custom_fields().get("custom_fields", [])
+            field = next(
+                (
+                    item
+                    for item in fields
+                    if item.get("id") == REDMINE_CENTER_CUSTOM_FIELD_ID
+                ),
+                None,
+            )
+            if field is None:
+                return CheckResult(
+                    name="Redmine center field",
+                    status=CheckStatus.WARN,
+                    message=f"Custom field {REDMINE_CENTER_CUSTOM_FIELD_ID} is unavailable",
+                )
+            if REDMINE_SUPPORT_TRACKER_ID not in field.get("trackers", []):
+                return CheckResult(
+                    name="Redmine center field",
+                    status=CheckStatus.WARN,
+                    message="Center field may not be enabled for the configured tracker",
+                )
+            if field.get("field_format") == "list" and not field.get("possible_values"):
+                return CheckResult(
+                    name="Redmine center field",
+                    status=CheckStatus.WARN,
+                    message="List-type center field values are not readable; values cannot be validated",
+                )
+            return CheckResult(
+                name="Redmine center field",
+                status=CheckStatus.OK,
+                message=f"Custom field {REDMINE_CENTER_CUSTOM_FIELD_ID} is available",
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Redmine center field",
+                status=CheckStatus.WARN,
+                message=f"Could not inspect Redmine center-field metadata: {exc}",
+            )
 
     def _check_gmail_token(self) -> CheckResult:
         """Check if Gmail token can be loaded."""
