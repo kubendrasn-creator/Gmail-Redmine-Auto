@@ -127,16 +127,14 @@ ALLOWED_MODULES = (
         if module.strip()
     ]
 )
-SIGNATURE_IMAGE_MAX_KB = int(os.getenv("SIGNATURE_IMAGE_MAX_KB", "50"))
-SIGNATURE_NAME_PATTERNS = [
-    pattern.strip()
-    for pattern in os.getenv(
-        "SIGNATURE_NAME_PATTERNS",
-        r"image[_-]?\d*|logo|outlook-|ascwebqi|signature|banner",
-    ).split("|")
-    if pattern.strip()
-]
-SIGNATURE_REPEAT_THRESHOLD = int(os.getenv("SIGNATURE_REPEAT_THRESHOLD", "3"))
+SIGNATURE_REPEAT_THRESHOLD = int(os.getenv("SIGNATURE_REPEAT_THRESHOLD", "2"))
+SIGNATURE_IMAGE_HASH_DISTANCE = int(
+    os.getenv("SIGNATURE_IMAGE_HASH_DISTANCE", "5")
+)
+if SIGNATURE_REPEAT_THRESHOLD < 2:
+    raise ValueError("SIGNATURE_REPEAT_THRESHOLD must be at least 2")
+if not 0 <= SIGNATURE_IMAGE_HASH_DISTANCE <= 64:
+    raise ValueError("SIGNATURE_IMAGE_HASH_DISTANCE must be between 0 and 64")
 IGNORED_ATTACHMENT_SHA256 = os.getenv("IGNORED_ATTACHMENT_SHA256", "")
 STRIP_BOILERPLATE = os.getenv("STRIP_BOILERPLATE", "true").lower() == "true"
 REDMINE_CENTER_CUSTOM_FIELD_ID = int(os.getenv("REDMINE_CENTER_CUSTOM_FIELD_ID") or 0)

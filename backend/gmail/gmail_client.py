@@ -12,11 +12,10 @@ from googleapiclient.discovery import build
 from backend.config.settings import (
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
-    SIGNATURE_IMAGE_MAX_KB,
-    SIGNATURE_NAME_PATTERNS,
+    SIGNATURE_IMAGE_HASH_DISTANCE,
     SIGNATURE_REPEAT_THRESHOLD,
 )
-from backend.gmail.attachment_filter import AttachmentFilterStore, classify_attachment
+from backend.gmail.attachment_filter import AttachmentFilterStore
 from backend.utils.logger import get_logger
 
 logger = get_logger("gmail")
@@ -234,29 +233,19 @@ class GmailClient:
                             "reason": "hash-denylist",
                         })
                         return
-                    decision = classify_attachment(
-                        metadata,
-                        body_html,
-                        signature_image_max_kb=SIGNATURE_IMAGE_MAX_KB,
-                        signature_name_patterns=SIGNATURE_NAME_PATTERNS,
-                    )
-                    if not decision.keep:
-                        self.last_filtered_attachments.append({
-                            **metadata,
-                            "reason": decision.reason,
-                        })
-                        return
                     if self.attachment_filter.record_image(
                         digest,
+                        file_data,
                         sender_domain,
                         message_id,
                         str(filename),
                         len(file_data),
                         SIGNATURE_REPEAT_THRESHOLD,
+                        SIGNATURE_IMAGE_HASH_DISTANCE,
                     ):
                         logger.info(
-                            "Signature image automatically ignored after repeated occurrences (sha256=%s)",
-                            digest,
+                            "Visually repeated image filtered for sender domain %s",
+                            sender_domain,
                         )
                         self.last_filtered_attachments.append({
                             **metadata,

@@ -1,64 +1,15 @@
 import hashlib
+from io import BytesIO
 import os
 import re
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image
+
 from backend.config.settings import DATABASE_DIR
-
-
-@dataclass(frozen=True)
-class FilterDecision:
-    keep: bool
-    reason: str
-
-
-def classify_attachment(
-    part_meta,
-    body_html,
-    *,
-    signature_image_max_kb=50,
-    signature_name_patterns=None,
-):
-    content_type = str(part_meta.get("content_type") or "").lower()
-    if not content_type.startswith("image/"):
-        return FilterDecision(True, "not-image")
-
-    filename = Path(str(part_meta.get("filename") or "")).name
-    size = int(part_meta.get("size") or 0)
-    content_id = str(part_meta.get("content_id") or "").strip("<> ")
-    cid_referenced = bool(
-        content_id
-        and re.search(
-            rf"cid:\s*{re.escape(content_id)}(?:[\"'>\s]|$)",
-            body_html or "",
-            re.IGNORECASE,
-        )
-    )
-    generic_name = bool(re.fullmatch(r"image(?:[_-]?\d+)?(?:\.[^.]+)?", filename, re.I))
-    if cid_referenced and (
-        size < signature_image_max_kb * 1024 or generic_name
-    ):
-        return FilterDecision(False, "inline-signature")
-
-    patterns = signature_name_patterns or (
-        r"image[_-]?\d*",
-        r"logo",
-        r"outlook-",
-        r"ascwebqi",
-        r"signature",
-        r"banner",
-    )
-    if size < signature_image_max_kb * 1024 and any(
-        re.search(pattern, filename, re.IGNORECASE)
-        for pattern in patterns
-    ):
-        return FilterDecision(False, "signature-name")
-
-    return FilterDecision(True, "kept")
 
 
 class AttachmentFilterStore:
@@ -82,14 +33,21 @@ class AttachmentFilterStore:
             )
             connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS attachment_observations (
+                CREATE TABLE IF NOT EXISTS visual_image_observations (
                     sha256 TEXT NOT NULL,
                     sender_domain TEXT NOT NULL,
                     message_id TEXT NOT NULL,
                     filename TEXT NOT NULL DEFAULT '',
                     size INTEGER NOT NULL DEFAULT 0,
+                    perceptual_hash TEXT NOT NULL,
                     PRIMARY KEY (sha256, sender_domain, message_id)
                 )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_visual_image_sender
+                ON visual_image_observations (sender_domain)
                 """
             )
         for digest in os.getenv("IGNORED_ATTACHMENT_SHA256", "").split(","):
@@ -104,7 +62,10 @@ class AttachmentFilterStore:
     def ignored(self, digest):
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             row = connection.execute(
-                "SELECT 1 FROM ignored_attachments WHERE sha256 = ?",
+                """
+                SELECT 1 FROM ignored_attachments
+                WHERE sha256 = ? AND reason != 'auto-repeat'
+                """,
                 (digest.lower(),),
             ).fetchone()
         return row is not None
@@ -132,44 +93,79 @@ class AttachmentFilterStore:
                 ),
             )
 
-    def record_image(self, digest, sender_domain, message_id, filename, size, threshold):
-        if not sender_domain or not message_id:
+    @staticmethod
+    def perceptual_hash(image_data):
+        try:
+            with Image.open(BytesIO(image_data)) as image:
+                if image.width * image.height > 40_000_000:
+                    return None
+                pixels = list(
+                    image.convert("RGB")
+                    .convert("L")
+                    .resize((9, 8), Image.Resampling.LANCZOS)
+                    .getdata()
+                )
+        except (Image.DecompressionBombError, OSError, ValueError):
+            return None
+
+        value = 0
+        for row in range(8):
+            offset = row * 9
+            for column in range(8):
+                value = (value << 1) | (
+                    pixels[offset + column] > pixels[offset + column + 1]
+                )
+        return f"{value:016x}"
+
+    def record_image(
+        self,
+        digest,
+        image_data,
+        sender_domain,
+        message_id,
+        filename,
+        size,
+        threshold,
+        max_hash_distance,
+    ):
+        if not sender_domain or not message_id or threshold < 2:
             return False
+        image_hash = self.perceptual_hash(image_data)
+        if image_hash is None:
+            return False
+
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            previous_images = connection.execute(
+                """
+                SELECT message_id, perceptual_hash
+                FROM visual_image_observations
+                WHERE sender_domain = ? AND message_id != ?
+                """,
+                (sender_domain.lower(), message_id),
+            ).fetchall()
+            matching_messages = {
+                previous_message_id
+                for previous_message_id, previous_hash in previous_images
+                if (
+                    int(image_hash, 16) ^ int(previous_hash, 16)
+                ).bit_count() <= max_hash_distance
+            }
             connection.execute(
                 """
-                INSERT OR IGNORE INTO attachment_observations
-                    (sha256, sender_domain, message_id, filename, size)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO visual_image_observations
+                    (sha256, sender_domain, message_id, filename, size, perceptual_hash)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (digest, sender_domain.lower(), message_id, filename, size),
+                (
+                    digest,
+                    sender_domain.lower(),
+                    message_id,
+                    filename,
+                    size,
+                    image_hash,
+                ),
             )
-            count = connection.execute(
-                """
-                SELECT COUNT(*) FROM attachment_observations
-                WHERE sha256 = ? AND sender_domain = ?
-                """,
-                (digest, sender_domain.lower()),
-            ).fetchone()[0]
-            if count >= threshold:
-                connection.execute(
-                    """
-                    INSERT OR IGNORE INTO ignored_attachments
-                        (sha256, filename, size, reason, added_at, hit_count)
-                    VALUES (?, ?, ?, 'auto-repeat', ?, 0)
-                    """,
-                    (
-                        digest,
-                        filename,
-                        size,
-                        datetime.now(timezone.utc).isoformat(),
-                    ),
-                )
-                return connection.execute(
-                    "SELECT reason FROM ignored_attachments WHERE sha256 = ?",
-                    (digest,),
-                ).fetchone()[0] == "auto-repeat"
-        return False
+        return len(matching_messages) + 1 >= threshold
 
     def record_hit(self, digest):
         with closing(sqlite3.connect(self.database_path)) as connection, connection:

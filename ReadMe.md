@@ -266,11 +266,12 @@ The system intelligently handles email attachments:
 - **Video compression**: Automatically compresses oversized videos using FFmpeg
 - **Skipped files**: Files that exceed limits are kept locally and noted in the ticket
 - **Streaming uploads**: Large files are streamed to avoid memory issues
-- **Signature images**: Small signature/logo images can be filtered by configured
-  filename patterns, inline content IDs, and repeat hash observations. Filtered
-  attachment details appear in review and the generated PDF. The CLI's
-  `--ignore-attachment` option adds the supplied file's SHA-256 to the local ignore
-  list.
+- **Repeated signature images**: Image pixels are compared with a perceptual hash;
+  filenames and inline/CID markers do not determine whether an image is filtered.
+  Near-identical images from the same sender domain are filtered starting with the
+  second occurrence by default. Adjust `SIGNATURE_IMAGE_HASH_DISTANCE` to control
+  visual-match tolerance. The CLI's `--ignore-attachment` option adds the supplied
+  file's SHA-256 to the local ignore list.
 
 ## CLI Options
 
