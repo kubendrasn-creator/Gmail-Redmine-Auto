@@ -266,12 +266,13 @@ The system intelligently handles email attachments:
 - **Video compression**: Automatically compresses oversized videos using FFmpeg
 - **Skipped files**: Files that exceed limits are kept locally and noted in the ticket
 - **Streaming uploads**: Large files are streamed to avoid memory issues
-- **Repeated signature images**: Image pixels are compared with a perceptual hash;
-  filenames and inline/CID markers do not determine whether an image is filtered.
-  Near-identical images from the same sender domain are filtered starting with the
-  second occurrence by default. Adjust `SIGNATURE_IMAGE_HASH_DISTANCE` to control
-  visual-match tolerance. The CLI's `--ignore-attachment` option adds the supplied
-  file's SHA-256 to the local ignore list.
+- **Known logo filtering**: Place the reference image at `env/logo.png`. Email image
+  attachments are normalized and compared pixel-by-pixel with that image; matching
+  images are omitted, while non-matching images are kept. Without `env/logo.png`,
+  this comparison does not filter any images. Adjust
+  `LOGO_IMAGE_MAX_PIXEL_DIFFERENCE` to control visual-match tolerance. The CLI's
+  `--ignore-attachment` option adds the supplied file's SHA-256 to the local ignore
+  list.
 
 ## CLI Options
 

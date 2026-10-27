@@ -9,7 +9,13 @@ from pathlib import Path
 
 from PIL import Image
 
-from backend.config.settings import DATABASE_DIR
+from backend.config.settings import (
+    DATABASE_DIR,
+    LOGO_IMAGE_MAX_PIXEL_DIFFERENCE,
+    LOGO_IMAGE_PATH,
+)
+
+_COMPARISON_SIZE = (48, 48)
 
 
 class AttachmentFilterStore:
@@ -18,6 +24,15 @@ class AttachmentFilterStore:
             database_path or DATABASE_DIR / "attachment_filter.sqlite3"
         )
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.logo_pixels = None
+        if LOGO_IMAGE_PATH.exists():
+            self.logo_pixels = self.normalized_pixels(
+                LOGO_IMAGE_PATH.read_bytes()
+            )
+            if self.logo_pixels is None:
+                raise ValueError(
+                    f"Could not read a supported image from {LOGO_IMAGE_PATH}"
+                )
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute(
                 """
@@ -29,25 +44,6 @@ class AttachmentFilterStore:
                     added_at TEXT NOT NULL,
                     hit_count INTEGER NOT NULL DEFAULT 0
                 )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS visual_image_observations (
-                    sha256 TEXT NOT NULL,
-                    sender_domain TEXT NOT NULL,
-                    message_id TEXT NOT NULL,
-                    filename TEXT NOT NULL DEFAULT '',
-                    size INTEGER NOT NULL DEFAULT 0,
-                    perceptual_hash TEXT NOT NULL,
-                    PRIMARY KEY (sha256, sender_domain, message_id)
-                )
-                """
-            )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_visual_image_sender
-                ON visual_image_observations (sender_domain)
                 """
             )
         for digest in os.getenv("IGNORED_ATTACHMENT_SHA256", "").split(","):
@@ -94,78 +90,37 @@ class AttachmentFilterStore:
             )
 
     @staticmethod
-    def perceptual_hash(image_data):
+    def normalized_pixels(image_data):
         try:
             with Image.open(BytesIO(image_data)) as image:
                 if image.width * image.height > 40_000_000:
                     return None
-                pixels = list(
-                    image.convert("RGB")
-                    .convert("L")
-                    .resize((9, 8), Image.Resampling.LANCZOS)
-                    .getdata()
+                image = image.convert("RGBA")
+                image.thumbnail(_COMPARISON_SIZE, Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", _COMPARISON_SIZE, "white")
+                canvas.paste(
+                    image,
+                    (
+                        (_COMPARISON_SIZE[0] - image.width) // 2,
+                        (_COMPARISON_SIZE[1] - image.height) // 2,
+                    ),
+                    image.getchannel("A"),
                 )
+                return canvas.tobytes()
         except (Image.DecompressionBombError, OSError, ValueError):
             return None
 
-        value = 0
-        for row in range(8):
-            offset = row * 9
-            for column in range(8):
-                value = (value << 1) | (
-                    pixels[offset + column] > pixels[offset + column + 1]
-                )
-        return f"{value:016x}"
-
-    def record_image(
-        self,
-        digest,
-        image_data,
-        sender_domain,
-        message_id,
-        filename,
-        size,
-        threshold,
-        max_hash_distance,
-    ):
-        if not sender_domain or not message_id or threshold < 2:
+    def matches_logo(self, image_data):
+        if self.logo_pixels is None:
             return False
-        image_hash = self.perceptual_hash(image_data)
-        if image_hash is None:
+        image_pixels = self.normalized_pixels(image_data)
+        if image_pixels is None:
             return False
-
-        with closing(sqlite3.connect(self.database_path)) as connection, connection:
-            previous_images = connection.execute(
-                """
-                SELECT message_id, perceptual_hash
-                FROM visual_image_observations
-                WHERE sender_domain = ? AND message_id != ?
-                """,
-                (sender_domain.lower(), message_id),
-            ).fetchall()
-            matching_messages = {
-                previous_message_id
-                for previous_message_id, previous_hash in previous_images
-                if (
-                    int(image_hash, 16) ^ int(previous_hash, 16)
-                ).bit_count() <= max_hash_distance
-            }
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO visual_image_observations
-                    (sha256, sender_domain, message_id, filename, size, perceptual_hash)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    digest,
-                    sender_domain.lower(),
-                    message_id,
-                    filename,
-                    size,
-                    image_hash,
-                ),
-            )
-        return len(matching_messages) + 1 >= threshold
+        mean_pixel_difference = sum(
+            abs(reference - candidate)
+            for reference, candidate in zip(self.logo_pixels, image_pixels)
+        ) / len(self.logo_pixels)
+        return mean_pixel_difference <= LOGO_IMAGE_MAX_PIXEL_DIFFERENCE
 
     def record_hit(self, digest):
         with closing(sqlite3.connect(self.database_path)) as connection, connection:

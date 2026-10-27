@@ -12,8 +12,6 @@ from googleapiclient.discovery import build
 from backend.config.settings import (
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
-    SIGNATURE_IMAGE_HASH_DISTANCE,
-    SIGNATURE_REPEAT_THRESHOLD,
 )
 from backend.gmail.attachment_filter import AttachmentFilterStore
 from backend.utils.logger import get_logger
@@ -233,23 +231,14 @@ class GmailClient:
                             "reason": "hash-denylist",
                         })
                         return
-                    if self.attachment_filter.record_image(
-                        digest,
-                        file_data,
-                        sender_domain,
-                        message_id,
-                        str(filename),
-                        len(file_data),
-                        SIGNATURE_REPEAT_THRESHOLD,
-                        SIGNATURE_IMAGE_HASH_DISTANCE,
-                    ):
+                    if self.attachment_filter.matches_logo(file_data):
                         logger.info(
-                            "Visually repeated image filtered for sender domain %s",
-                            sender_domain,
+                            "Image matching configured logo filtered (filename=%s)",
+                            filename,
                         )
                         self.last_filtered_attachments.append({
                             **metadata,
-                            "reason": "auto-repeat",
+                            "reason": "matches-configured-logo",
                         })
                         return
 

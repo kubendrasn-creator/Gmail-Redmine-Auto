@@ -285,7 +285,7 @@ class EmailPdfGenerator:
         filtered_count = len(email.get("filtered_attachments", []))
         if filtered_count:
             story.append(Paragraph(
-                f"{filtered_count} signature images omitted",
+                f"{filtered_count} filtered images omitted",
                 styles["MutedSmall"],
             ))
         if email.get("boilerplate_removed"):
