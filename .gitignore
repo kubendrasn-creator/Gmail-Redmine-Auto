@@ -25,8 +25,8 @@ data/logs/*
 data/database/*.sqlite3
 data/database/*.sqlite3-*
 data/database/processed_messages.json
-email_data/generated_emails/*
-!email_data/generated_emails/.gitkeep
-email_data/email_attachments/*
-!email_data/email_attachments/.gitkeep
+data/generated_emails/*
+!data/generated_emails/.gitkeep
+data/email_attachments/*
+!data/email_attachments/.gitkeep
 *.pdf
