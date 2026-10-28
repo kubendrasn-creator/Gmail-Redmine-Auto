@@ -1,0 +1,34 @@
+# Gmail-Redmine Configuration
+# This file consolidates all configuration into one place
+
+# Redmine Ticket Categories
+categories:
+  Support: 1
+  Operations: 2
+
+# Module Configuration
+module_custom_field_id: 7
+modules:
+  - Admissions
+  - Billing
+  - Reporting
+
+# Center Creation Defaults
+center_creation:
+  category: Operations
+  module: Admissions
+
+# People/Assignee Mapping
+# Maps names to Redmine user IDs
+people:
+  Example User: 1
+
+# Email Boilerplate Patterns
+# These patterns are stripped from email bodies to remove noise
+boilerplate_patterns:
+  - "Email Confidentiality Notice"
+  - "intended for the sole use"
+  - "You received this message because you are subscribed to the Google Groups"
+  - "To unsubscribe from this group"
+  - "To view this discussion visit"
+  - "^Sent from my "

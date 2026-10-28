@@ -45,7 +45,14 @@ class CheckStatus(Enum):
 
 @dataclass
 class CheckResult:
-    """Result of a single preflight check."""
+    """
+    Result of a single preflight check.
+
+    Attributes:
+        name: Name of the check
+        status: Status of the check (OK, WARN, FAIL)
+        message: Descriptive message about the check result
+    """
     name: str
     status: CheckStatus
     message: str
@@ -54,9 +61,17 @@ class CheckResult:
 class PreflightValidator:
     """
     Validates system configuration and dependencies.
+
+    Performs comprehensive checks on:
+    - Redmine connectivity and configuration
+    - Gmail authentication and permissions
+    - AI service availability
+    - System dependencies (FFmpeg, etc.)
+    - File system permissions
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the preflight validator."""
         self.checks: List[CheckResult] = []
 
     def run_all(self) -> List[CheckResult]:
@@ -82,9 +97,12 @@ class PreflightValidator:
         ]
         return self.checks
 
-    def print_report(self):
+    def print_report(self) -> bool:
         """
         Print a formatted table of check results.
+
+        Returns:
+            True if no failures, False otherwise
         """
         print("\n" + "=" * 80)
         print("PREFLIGHT VALIDATION REPORT")
