@@ -305,10 +305,9 @@ Gmail-Redmine/
 │   └── main.py
 ├── data/
 │   ├── database/
-│   └── logs/
-├── email_data/
 │   ├── email_attachments/ (Temporary downloaded email attachments; cleaned after upload)
-│   └── generated_emails/  (Generated email PDFs; cleaned after upload)
+│   ├── generated_emails/  (Generated email PDFs; cleaned after upload)
+│   └── logs/
 ```
 
 ## Important Notes

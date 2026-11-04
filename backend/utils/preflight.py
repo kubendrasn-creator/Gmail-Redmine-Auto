@@ -14,6 +14,7 @@ from backend.config.settings import (
     EMAIL_ATTACHMENTS_DIR,
     GEMINI_API_KEY,
     GENERATED_EMAILS_DIR,
+    LOG_FILE_PATH,
     REDMINE_API_KEY,
     REDMINE_ASSIGNEE_ID,
     PEOPLE,
@@ -435,6 +436,7 @@ class PreflightValidator:
         dirs_to_check = [
             EMAIL_ATTACHMENTS_DIR,
             GENERATED_EMAILS_DIR,
+            LOG_FILE_PATH.parent,
             DATABASE_DIR,
         ]
 

@@ -4,7 +4,7 @@ from typing import Callable, Literal
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.config.settings import (
     AI_MAX_INPUT_CHARS,
@@ -69,19 +69,19 @@ class EmailClassificationResult(BaseModel):
             "add, register, onboard, set up, or configure a new center or facility."
         ),
     )
-    issue_evidence: str = Field(
+    issue_evidence: str | None = Field(
         default="",
         description="Verbatim quote from email supporting that an issue exists, or empty string if none",
     )
-    center: str = Field(
+    center: str | None = Field(
         default="",
         description="Extracted facility/center name if present, else empty string.",
     )
-    enterprise: str = Field(
+    enterprise: str | None = Field(
         default="",
         description="Extracted enterprise or customer group if present, else empty string.",
     )
-    module: str = Field(
+    module: str | None = Field(
         default="",
         description="Extracted system module or component if present, else empty string.",
     )
@@ -89,11 +89,11 @@ class EmailClassificationResult(BaseModel):
         default="support",
         description="Use feedback for explicit product feedback; otherwise support.",
     )
-    assignee_name: str = Field(
+    assignee_name: str | None = Field(
         default="",
         description="Person explicitly asked to own or act on the work, or empty string.",
     )
-    assignee_evidence: str = Field(
+    assignee_evidence: str | None = Field(
         default="",
         description="Verbatim body sentence naming the requested assignee, or empty string.",
     )
@@ -125,6 +125,29 @@ class EmailClassificationResult(BaseModel):
         )
     )
 
+    @field_validator(
+        "issue_evidence",
+        "center",
+        "enterprise",
+        "module",
+        "assignee_name",
+        "assignee_evidence",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_none_to_str(cls, value):
+        return "" if value is None else value
+
+    @field_validator("missing_fields", mode="before")
+    @classmethod
+    def _coerce_missing_fields(cls, value):
+        return [] if value is None else value
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, value):
+        return 0.0 if value is None else value
+
 
 class SubjectTriageResult(BaseModel):
     """Conservative first-pass routing based on the subject line only."""
@@ -137,6 +160,16 @@ class SubjectTriageResult(BaseModel):
     )
     confidence: float = Field(default=0.0, description="Confidence score from 0 to 1.")
     reasoning: str = Field(description="Short reason based only on the subject.")
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, value):
+        return 0.0 if value is None else value
+
+    @field_validator("reasoning", mode="before")
+    @classmethod
+    def _coerce_reasoning(cls, value):
+        return "" if value is None else value
 
 
 SUBJECT_TRIAGE_PROMPT = """

@@ -145,6 +145,7 @@ def main():
     max_results = args.max_results if args.max_results is not None else GMAIL_MAX_RESULTS
     app_mode = "terminal" if args.no_ui else (args.mode or APP_MODE)
 
+    checks = []
     # Run preflight unless skipped
     if not args.skip_preflight:
         validator = PreflightValidator()

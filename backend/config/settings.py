@@ -173,7 +173,7 @@ RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "4"))
 
 # Paths and directories
 LOG_FILE_PATH = BASE_DIR / "data" / "logs" / "gmail_redmine.log"
-EMAIL_DATA_DIR = BASE_DIR / "email_data"
+EMAIL_DATA_DIR = BASE_DIR / "data"
 GENERATED_EMAILS_DIR = EMAIL_DATA_DIR / "generated_emails"
 EMAIL_ATTACHMENTS_DIR = EMAIL_DATA_DIR / "email_attachments"
 ATTACHMENTS_DIR = EMAIL_ATTACHMENTS_DIR
