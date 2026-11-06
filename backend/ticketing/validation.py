@@ -12,8 +12,14 @@ SUPPORTED_REQUIRED_FIELDS = {
 
 
 def missing_required_fields(values):
+    required_fields = REQUIRED_FIELDS
+    if str(values.get("ticket_type") or "").strip().lower() == "feedback":
+        required_fields = [
+            field for field in REQUIRED_FIELDS
+            if field != "module"
+        ]
     return [
         field
-        for field in REQUIRED_FIELDS
+        for field in required_fields
         if not values.get(field)
     ]

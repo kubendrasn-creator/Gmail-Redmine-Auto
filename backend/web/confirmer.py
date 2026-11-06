@@ -3,6 +3,8 @@ import uuid
 
 from backend.config.settings import REDMINE_PROJECT_ID
 from backend.config.settings import (
+    FEEDBACK_CATEGORY_IDS_BY_MODULE,
+    FEEDBACK_DEFAULT_CATEGORY_ID,
     REDMINE_FEEDBACK_TRACKER_ID,
     REDMINE_SUPPORT_TRACKER_ID,
     REDMINE_CENTER_CUSTOM_FIELD_ID,
@@ -113,6 +115,8 @@ class WebConfirmer:
                 "feedback_tracker_id": REDMINE_FEEDBACK_TRACKER_ID,
                 "center_custom_field_id": REDMINE_CENTER_CUSTOM_FIELD_ID,
                 "module_custom_field_id": REDMINE_MODULE_CUSTOM_FIELD_ID,
+                "feedback_category_ids_by_module": FEEDBACK_CATEGORY_IDS_BY_MODULE,
+                "feedback_default_category_id": FEEDBACK_DEFAULT_CATEGORY_ID,
                 "center_suggestion": classification.get("center_resolution", {}).get("suggestion"),
                 "center_field_required": classification.get("center_field_required", False),
             },

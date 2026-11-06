@@ -57,6 +57,50 @@ if _default_category and _category_names and _default_category not in _category_
     raise ValueError(
         "center_creation.category must match a name in ticket_fields.json categories"
     )
+_configured_modules = _ticket_fields.get("modules")
+if _configured_modules is not None and (
+    not isinstance(_configured_modules, list)
+    or not all(
+        isinstance(module, str) and module.strip()
+        for module in _configured_modules
+    )
+):
+    raise ValueError("modules in ticket_fields.json must be a list of non-empty names")
+_feedback_default_category = _ticket_fields.get(
+    "feedback_default_category",
+    "General / All Modules",
+)
+if (
+    not isinstance(_feedback_default_category, str)
+    or _feedback_default_category not in _category_names
+):
+    raise ValueError(
+        "feedback_default_category must match a name in ticket_fields.json categories"
+    )
+_feedback_module_categories = _ticket_fields.get(
+    "feedback_module_categories",
+    {},
+)
+if not isinstance(_feedback_module_categories, dict):
+    raise ValueError("feedback_module_categories must map module names to category names")
+for module_name, category_name in _feedback_module_categories.items():
+    if _configured_modules is not None and module_name not in _configured_modules:
+        raise ValueError(
+            f"Feedback category mapping has unknown module {module_name!r}"
+        )
+    if category_name not in _category_names:
+        raise ValueError(
+            f"Feedback category for {module_name!r} must match a configured category"
+        )
+if _configured_modules is not None:
+    unmapped_feedback_modules = (
+        set(_configured_modules) - set(_feedback_module_categories)
+    )
+    if unmapped_feedback_modules:
+        raise ValueError(
+            "Missing feedback category mapping for module(s): "
+            + ", ".join(sorted(unmapped_feedback_modules))
+        )
 _default_module = _center_creation_fields.get("module")
 if _default_module is not None and (
     not isinstance(_default_module, str) or not _default_module.strip()
@@ -66,6 +110,13 @@ if _default_module is not None and (
 REDMINE_MODULE_CUSTOM_FIELD_ID = int(
     _ticket_fields.get("module_custom_field_id") or 0
 )
+FEEDBACK_DEFAULT_CATEGORY_ID = int(
+    _category_names[_feedback_default_category]
+)
+FEEDBACK_CATEGORY_IDS_BY_MODULE = {
+    module: int(_category_names[category])
+    for module, category in _feedback_module_categories.items()
+}
 REDMINE_MODULE_VALUE = _center_creation_fields.get("module")
 REDMINE_ISSUES_CATEGORY = int(
     _category_names.get(_center_creation_fields.get("category"))
@@ -112,16 +163,11 @@ VIDEO_COMPRESSION_ENABLED = os.getenv("VIDEO_COMPRESSION_ENABLED", "true").lower
 
 # AI configuration
 AI_MAX_INPUT_CHARS = int(os.getenv("AI_MAX_INPUT_CHARS", "6000"))
-AI_THINKING_BUDGET = int(os.getenv("AI_THINKING_BUDGET", "1024"))
-_configured_modules = _ticket_fields.get("modules")
-if _configured_modules is not None and (
-    not isinstance(_configured_modules, list)
-    or not all(
-        isinstance(module, str) and module.strip()
-        for module in _configured_modules
+AI_THINKING_LEVEL = os.getenv("AI_THINKING_LEVEL", "LOW").strip().upper()
+if AI_THINKING_LEVEL not in {"MINIMAL", "LOW", "MEDIUM", "HIGH"}:
+    raise ValueError(
+        "AI_THINKING_LEVEL must be one of MINIMAL, LOW, MEDIUM, or HIGH"
     )
-):
-    raise ValueError("modules in ticket_fields.json must be a list of non-empty names")
 if _default_module and _configured_modules and _default_module not in _configured_modules:
     raise ValueError(
         "center_creation.module must be included in the ticket_fields.json modules list"

@@ -88,6 +88,7 @@ class PreflightValidator:
             self._check_redmine_category_exists(),
             self._check_redmine_custom_fields(),
             self._check_assignee_configuration(),
+            self._check_module_field_metadata(),
             self._check_center_field_metadata(),
             self._check_gmail_token(),
             self._check_gmail_scope(),
@@ -332,7 +333,11 @@ class PreflightValidator:
                     status=CheckStatus.WARN,
                     message=f"Custom field {REDMINE_CENTER_CUSTOM_FIELD_ID} is unavailable",
                 )
-            if REDMINE_SUPPORT_TRACKER_ID not in field.get("trackers", []):
+            enabled_tracker_ids = {
+                tracker.get("id") if isinstance(tracker, dict) else tracker
+                for tracker in field.get("trackers", [])
+            }
+            if REDMINE_SUPPORT_TRACKER_ID not in enabled_tracker_ids:
                 return CheckResult(
                     name="Redmine center field",
                     status=CheckStatus.WARN,
@@ -354,6 +359,64 @@ class PreflightValidator:
                 name="Redmine center field",
                 status=CheckStatus.WARN,
                 message=f"Could not inspect Redmine center-field metadata: {exc}",
+            )
+
+    def _check_module_field_metadata(self) -> CheckResult:
+        if not REDMINE_MODULE_CUSTOM_FIELD_ID:
+            return CheckResult(
+                name="Redmine module field",
+                status=CheckStatus.WARN,
+                message="Module custom field ID is not configured",
+            )
+        try:
+            fields = RedmineClient().get_custom_fields().get("custom_fields", [])
+            field = next(
+                (
+                    item
+                    for item in fields
+                    if item.get("id") == REDMINE_MODULE_CUSTOM_FIELD_ID
+                ),
+                None,
+            )
+            if field is None or field.get("name", "").casefold() != "module":
+                return CheckResult(
+                    name="Redmine module field",
+                    status=CheckStatus.FAIL,
+                    message=(
+                        "Configured module custom field ID does not match "
+                        "Redmine's Module field"
+                    ),
+                )
+
+            enabled_tracker_ids = {
+                tracker.get("id") if isinstance(tracker, dict) else tracker
+                for tracker in field.get("trackers", [])
+            }
+            unsupported_trackers = [
+                tracker_id
+                for tracker_id in (REDMINE_SUPPORT_TRACKER_ID,)
+                if tracker_id and tracker_id not in enabled_tracker_ids
+            ]
+            if unsupported_trackers:
+                tracker_list = ", ".join(map(str, unsupported_trackers))
+                return CheckResult(
+                    name="Redmine module field",
+                    status=CheckStatus.WARN,
+                    message=(
+                        f"Module field is not enabled for tracker(s) {tracker_list}; "
+                        "tickets using those trackers cannot save the selected module"
+                    ),
+                )
+            return CheckResult(
+                name="Redmine module field",
+                status=CheckStatus.OK,
+                message=f"Module custom field {REDMINE_MODULE_CUSTOM_FIELD_ID} is available",
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Redmine module field",
+                status=CheckStatus.WARN,
+                message=f"Could not inspect Redmine module-field metadata: {exc}",
             )
 
     def _check_gmail_token(self) -> CheckResult:

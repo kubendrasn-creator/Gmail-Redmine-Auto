@@ -213,6 +213,9 @@ in the `modules` list to validate classifier output, and set the
 `center_creation.category` and `center_creation.module` defaults as needed. Start
 from `env/config/ticket_fields.example.json`. The path defaults to
 `env/config/ticket_fields.json` and can be overridden with `TICKET_FIELDS_FILE`.
+Feedback tickets do not send module custom fields. Instead,
+`feedback_module_categories` maps each selected module to a Redmine issue category;
+when no module is selected, `feedback_default_category` is used.
 
 ### Ticket prefill and review metadata
 
@@ -238,7 +241,7 @@ Center and enterprise are optional when neither is present in the email.
 Center-creation requests are classified as `center_creation`. Their module and
 built-in category defaults come from `env/config/ticket_fields.json`.
 Feedback is available as a ticket type and uses the configured
-`REDMINE_FEEDBACK_TRACKER_ID` (set to tracker 4 in this environment).
+`REDMINE_FEEDBACK_TRACKER_ID`. Feedback does not require a module.
 
 Review decisions and field corrections are kept locally in
 `data/database/review_metadata.sqlite3`. Subject and description text are omitted by

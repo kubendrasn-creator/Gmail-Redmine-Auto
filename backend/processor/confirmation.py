@@ -90,7 +90,7 @@ class CliConfirmer:
             "Suggested fields: "
             f"type={classification.get('ticket_type') or 'support'}, "
             f"center/enterprise={classification.get('center_or_enterprise') or '(missing)'}, "
-            f"module={classification.get('module') or '(missing)'}, "
+            f"module={classification.get('module') or '(default category for feedback)'}, "
             f"assignee={classification.get('assignee_name') or classification.get('assignee_id') or '(default)'}"
         )
         resolution = classification.get("center_resolution", {})
@@ -107,7 +107,10 @@ class CliConfirmer:
             "Center / enterprise",
             classification.get("center_or_enterprise") or "",
         )
-        module = self._ask_value("Module", classification.get("module") or "")
+        module = self._ask_value(
+            "Module (feedback uses it to select a category; blank uses General / All Modules)",
+            classification.get("module") or "",
+        )
         people = classification.get("people", {})
         default_assignee_id = classification.get("default_assignee_id") or classification.get("assignee_id")
         assignee_options = ", ".join(

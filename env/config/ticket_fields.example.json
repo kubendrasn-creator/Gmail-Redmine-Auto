@@ -1,9 +1,10 @@
 {
   "categories": {
     "Support": 1,
-    "Operations": 2
+    "Operations": 2,
+    "General / All Modules": 3
   },
-  "module_custom_field_id": 7,
+  "module_custom_field_id": 9,
   "modules": [
     "Admissions",
     "Billing",
@@ -12,5 +13,11 @@
   "center_creation": {
     "category": "Operations",
     "module": "Admissions"
+  },
+  "feedback_default_category": "General / All Modules",
+  "feedback_module_categories": {
+    "Admissions": "Support",
+    "Billing": "Support",
+    "Reporting": "Operations"
   }
 }

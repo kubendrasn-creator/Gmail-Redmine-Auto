@@ -14,6 +14,8 @@ from backend.config.settings import (
     REDMINE_MODULE_VALUE,
     REDMINE_ISSUES_CATEGORY,
     REDMINE_TICKET_FIELD_DEFAULTS,
+    FEEDBACK_CATEGORY_IDS_BY_MODULE,
+    FEEDBACK_DEFAULT_CATEGORY_ID,
     REDMINE_MESSAGEID_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_CUSTOM_FIELD_ID,
     REDMINE_SEVERITY_VALUE,
@@ -103,6 +105,49 @@ class RedmineClient:
         store.cache_metadata("custom_fields", value)
         return value
 
+    def _validate_module_custom_field(self, tracker_id, module_value):
+        if not REDMINE_MODULE_CUSTOM_FIELD_ID or not module_value:
+            return
+
+        fields = self.get_custom_fields().get("custom_fields", [])
+        field = next(
+            (
+                item for item in fields
+                if item.get("id") == REDMINE_MODULE_CUSTOM_FIELD_ID
+            ),
+            None,
+        )
+        if field is None or field.get("name", "").casefold() != "module":
+            raise ValueError(
+                "The configured module custom field does not match Redmine's Module field"
+            )
+
+        enabled_tracker_ids = {
+            tracker.get("id") if isinstance(tracker, dict) else tracker
+            for tracker in field.get("trackers", [])
+        }
+        if tracker_id not in enabled_tracker_ids:
+            raise ValueError(
+                f"Redmine's Module custom field is not enabled for tracker {tracker_id}; "
+                "enable it for this tracker in Redmine before creating the ticket"
+            )
+
+        if field.get("field_format") == "list":
+            options = field.get("possible_values")
+            if not isinstance(options, list) or not options:
+                raise ValueError(
+                    "Redmine's Module choices could not be loaded; refusing to create "
+                    "a ticket with an unvalidated module"
+                )
+            allowed_values = {
+                option.get("value") if isinstance(option, dict) else option
+                for option in options
+            }
+            if module_value not in allowed_values:
+                raise ValueError(
+                    "The selected module is not an allowed value in Redmine"
+                )
+
     def get_issue_priorities(self):
         response = requests.get(
             f"{self.base_url}/enumerations/issue_priorities.json",
@@ -178,33 +223,66 @@ class RedmineClient:
             classification_category,
             {},
         )
-        category_id = ticket_defaults.get(
-            "category_id",
-            REDMINE_ISSUES_CATEGORY,
-        )
+        if ticket_type == "feedback":
+            if module:
+                try:
+                    category_id = FEEDBACK_CATEGORY_IDS_BY_MODULE[module]
+                except KeyError as exc:
+                    raise ValueError(
+                        f"No Redmine category is configured for feedback module {module!r}"
+                    ) from exc
+            else:
+                category_id = FEEDBACK_DEFAULT_CATEGORY_ID
+            if not category_id:
+                raise ValueError(
+                    "No default Redmine category is configured for feedback tickets"
+                )
+        else:
+            category_id = ticket_defaults.get(
+                "category_id",
+                REDMINE_ISSUES_CATEGORY,
+            )
         if category_id:
             issue["category_id"] = category_id
 
         custom_fields = []
-        module_value = REDMINE_MODULE_VALUE
-        if classification_category == "center_creation":
-            module_value = module or ticket_defaults.get("module_value")
-        if REDMINE_MODULE_CUSTOM_FIELD_ID and module_value:
+        module_value = (
+            module
+            or ticket_defaults.get("module_value")
+            or REDMINE_MODULE_VALUE
+        )
+        if (
+            ticket_type != "feedback"
+            and REDMINE_MODULE_CUSTOM_FIELD_ID
+            and module_value
+        ):
             custom_fields.append({
                 "id": REDMINE_MODULE_CUSTOM_FIELD_ID,
                 "value": module_value,
             })
-        if REDMINE_SEVERITY_CUSTOM_FIELD_ID and REDMINE_SEVERITY_VALUE:
+        if (
+            ticket_type != "feedback"
+            and REDMINE_SEVERITY_CUSTOM_FIELD_ID
+            and REDMINE_SEVERITY_VALUE
+        ):
             custom_fields.append({
                 "id": REDMINE_SEVERITY_CUSTOM_FIELD_ID,
                 "value": REDMINE_SEVERITY_VALUE,
             })
-        if message_id and REDMINE_MESSAGEID_CUSTOM_FIELD_ID:
+        if (
+            ticket_type != "feedback"
+            and message_id
+            and REDMINE_MESSAGEID_CUSTOM_FIELD_ID
+        ):
             custom_fields.append({
                 "id": REDMINE_MESSAGEID_CUSTOM_FIELD_ID,
                 "value": str(message_id),
             })
-        if center and REDMINE_CENTER_CUSTOM_FIELD_ID:
+        if (
+            ticket_type != "feedback"
+            and center
+            and REDMINE_CENTER_CUSTOM_FIELD_ID
+        ):
             custom_fields.append({
                 "id": REDMINE_CENTER_CUSTOM_FIELD_ID,
                 "value": center,
@@ -242,6 +320,20 @@ class RedmineClient:
             module=module,
             classification_category=classification_category,
         )
+
+        module_value = next(
+            (
+                field.get("value")
+                for field in payload["issue"].get("custom_fields", [])
+                if field.get("id") == REDMINE_MODULE_CUSTOM_FIELD_ID
+            ),
+            None,
+        )
+        if not self.dry_run:
+            self._validate_module_custom_field(
+                payload["issue"]["tracker_id"],
+                module_value,
+            )
 
         if self.dry_run:
             logger.info(f"[DRY-RUN] Would create issue with payload: {self._redact_api_key(str(payload))}")

@@ -254,15 +254,24 @@
       ...(fieldOptions.modules || []),
       ...(prefill.module?.value ? [prefill.module.value] : []),
     ])].map((value) => ({ label: value, value }));
+    let moduleFieldLabel;
     if ((fieldOptions.modules || []).length) {
-      form.append(selectField("Module", "module", moduleChoices, prefill.module?.value || ""));
+      const moduleLabel = selectField(
+        "Module",
+        "module",
+        moduleChoices,
+        prefill.module?.value || "",
+      );
+      moduleFieldLabel = moduleLabel.querySelector(".field-marker");
+      form.append(moduleLabel);
     } else {
       const moduleLabel = node("label", undefined, "review-field");
-      moduleLabel.append(node(
+      moduleFieldLabel = node(
         "span",
         `Module · ${prefill.module?.status || "missing"}`,
         "field-marker",
-      ));
+      );
+      moduleLabel.append(moduleFieldLabel);
       const moduleInput = document.createElement("input");
       moduleInput.name = "module";
       moduleInput.maxLength = 100;
@@ -516,24 +525,35 @@
           ? fieldOptions.feedback_tracker_id
           : fieldOptions.support_tracker_id;
         current.issue.assigned_to_id = Number(reviewFields.assignee.value) || null;
-        const centerFieldId = Number(fieldOptions.center_custom_field_id) || 0;
-        if (centerFieldId) {
-          const customFields = (current.issue.custom_fields || [])
-            .filter((field) => Number(field.id) !== centerFieldId);
-          customFields.push({ id: centerFieldId, value: centerInput.value.trim() });
-          current.issue.custom_fields = customFields;
-        }
-        if (classification.category === "center_creation") {
-          const moduleFieldId = Number(fieldOptions.module_custom_field_id) || 0;
-          if (moduleFieldId) {
+        const moduleFieldId = Number(fieldOptions.module_custom_field_id) || 0;
+        const selectedModule = reviewFields.module.value.trim();
+        if (selectedType === "feedback") {
+          current.issue.category_id = (
+            fieldOptions.feedback_category_ids_by_module?.[selectedModule]
+            || fieldOptions.feedback_default_category_id
+          );
+          delete current.issue.custom_fields;
+          moduleFieldLabel.textContent = (
+            `Feedback category · ${selectedModule || "General / All Modules"}`
+          );
+        } else {
+          moduleFieldLabel.textContent = `Module · ${prefill.module?.status || "missing"}`;
+          const centerFieldId = Number(fieldOptions.center_custom_field_id) || 0;
+          if (centerFieldId) {
             const customFields = (current.issue.custom_fields || [])
-              .filter((field) => Number(field.id) !== moduleFieldId);
-            customFields.push({
-              id: moduleFieldId,
-              value: reviewFields.module.value || "",
-            });
+              .filter((field) => Number(field.id) !== centerFieldId);
+            customFields.push({ id: centerFieldId, value: centerInput.value.trim() });
             current.issue.custom_fields = customFields;
           }
+        }
+        if (selectedType !== "feedback" && moduleFieldId && selectedModule) {
+          const customFields = (current.issue.custom_fields || [])
+            .filter((field) => Number(field.id) !== moduleFieldId);
+          customFields.push({
+            id: moduleFieldId,
+            value: selectedModule,
+          });
+          current.issue.custom_fields = customFields;
         }
         const marker = String(current.issue.description || "").match(
           /<!-- gmail-message-id: [A-Za-z0-9_-]+ -->/
@@ -545,6 +565,29 @@
       }
       previewPre.textContent = JSON.stringify(current, null, 2);
     }
+    const updateModuleLabel = () => {
+      if (reviewFields.ticket_type.value === "feedback") {
+        moduleFieldLabel.textContent = (
+          `Feedback category · ${reviewFields.module.value.trim() || "General / All Modules"}`
+        );
+      } else {
+        moduleFieldLabel.textContent = `Module · ${prefill.module?.status || "missing"}`;
+      }
+    };
+    reviewFields.ticket_type.addEventListener("change", () => {
+      updateModuleLabel();
+      updatePreview();
+    });
+    centerInput.addEventListener("input", updatePreview);
+    reviewFields.module.addEventListener("input", () => {
+      updateModuleLabel();
+      updatePreview();
+    });
+    reviewFields.module.addEventListener("change", () => {
+      updateModuleLabel();
+      updatePreview();
+    });
+    updateModuleLabel();
     updatePreview();
   }
 

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from backend.config.settings import (
     AI_MAX_INPUT_CHARS,
     ALLOWED_MODULES,
-    AI_THINKING_BUDGET,
+    AI_THINKING_LEVEL,
     GEMINI_API_KEY,
     REDMINE_ASSIGNEE_ID,
 )
@@ -294,7 +294,7 @@ class TicketClassifier:
                         response_schema=SubjectTriageResult,
                         thinking_config=types.ThinkingConfig(
                             include_thoughts=True,
-                            thinking_budget=AI_THINKING_BUDGET,
+                            thinking_level=types.ThinkingLevel[AI_THINKING_LEVEL],
                         ),
                         temperature=0,
                     ),
@@ -348,7 +348,7 @@ EMAIL BODY:
                     response_schema=EmailClassificationResult,
                     thinking_config=types.ThinkingConfig(
                         include_thoughts=True,
-                        thinking_budget=AI_THINKING_BUDGET,
+                        thinking_level=types.ThinkingLevel[AI_THINKING_LEVEL],
                     ),
                     temperature=0.1,
                 ),
