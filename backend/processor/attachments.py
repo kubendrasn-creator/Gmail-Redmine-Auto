@@ -69,6 +69,18 @@ class AttachmentPipeline:
         self.max_size_bytes = (max_size_mb or REDMINE_MAX_ATTACHMENT_MB) * 1024 * 1024
         self.compression_enabled = VIDEO_COMPRESSION_ENABLED
 
+    @staticmethod
+    def upload_failure_note(filename: str) -> str:
+        if Path(filename).suffix.lower() == ".mp4":
+            return (
+                "An MP4 file is present in the email but could not be uploaded "
+                "to Redmine. Please check the original email for further information."
+            )
+        return (
+            "An email attachment could not be uploaded to Redmine. "
+            "Please check the original email for further information."
+        )
+
     def plan_attachments(self, paths: List[Path]) -> List[AttachmentPlan]:
         """
         Create attachment plans without side effects.
@@ -206,7 +218,7 @@ class AttachmentPipeline:
                     original_size=plan.original_size,
                     final_size=plan.original_size,
                     action=AttachmentAction.SKIP,
-                    note=f"Upload failed: {str(e)}",
+                    note=self.upload_failure_note(plan.name),
                     local_path=plan.local_path,
                 ))
 

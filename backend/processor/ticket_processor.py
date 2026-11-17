@@ -47,6 +47,20 @@ from backend.utils.retry import RedmineUploadError
 logger = get_logger("processor")
 
 
+def _redmine_attachment_handling_note(attachment_handling):
+    note_lines = []
+    for line in attachment_handling:
+        if line.startswith("Skipped "):
+            match = re.match(r"Skipped (.+?):", line)
+            if match:
+                note_lines.append(
+                    AttachmentPipeline.upload_failure_note(match.group(1))
+                )
+                continue
+        note_lines.append(re.sub(r"; local path: .+$", "", line))
+    return "Attachment handling:\n" + "\n".join(note_lines)
+
+
 class TicketProcessor:
     """
     Orchestrates the complete Gmail -> Redmine ticket workflow.
@@ -971,11 +985,9 @@ class TicketProcessor:
                     self.redmine,
                     plans,
                 )
-                skipped = []
                 for attachment, result in zip(pending_attachments, results):
                     filename = attachment["filename"]
                     if result.action.value == "SKIP":
-                        skipped.append(result)
                         preserve_paths.add(Path(attachment["path"]).resolve())
                         attachment_handling.append(
                             f"Skipped {result.name}: {result.note or 'Upload was not completed'}; "
@@ -1004,11 +1016,11 @@ class TicketProcessor:
                         except (requests.Timeout, requests.ConnectionError) as upload_error:
                             if not self._issue_has_attachment(issue_id, filename):
                                 raise upload_error
-                        except RedmineUploadError as exc:
-                            skipped.append(result)
+                        except RedmineUploadError:
                             preserve_paths.add(Path(attachment["path"]).resolve())
                             attachment_handling.append(
-                                f"Skipped {result.name}: HTTP {exc.status}; "
+                                f"Skipped {result.name}: "
+                                f"{self.attachment_pipeline.upload_failure_note(result.name)}; "
                                 f"local path: {attachment['path']}"
                             )
                             continue
@@ -1023,18 +1035,6 @@ class TicketProcessor:
                             issue_id,
                         )
 
-                if skipped:
-                    updated_description = (
-                        f"[Attachment missing - see note]\n\n{description}"
-                    )
-                    marker = self.redmine._message_marker(message_id)
-                    if marker not in updated_description:
-                        updated_description = f"{updated_description.rstrip()}\n\n{marker}"
-                    self.redmine.update_issue_description(
-                        issue_id,
-                        updated_description,
-                    )
-
                 self.processed_store.update(
                     message_id,
                     attachments_processed=True,
@@ -1042,7 +1042,9 @@ class TicketProcessor:
                 )
 
             if attachment_handling and not record.get("handling_note_written"):
-                handling_note = "Attachment handling:\n" + "\n".join(attachment_handling)
+                handling_note = _redmine_attachment_handling_note(
+                    attachment_handling
+                )
                 try:
                     self.redmine.add_issue_note(issue_id, handling_note)
                 except Exception as note_error:

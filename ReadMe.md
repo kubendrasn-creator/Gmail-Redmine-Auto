@@ -150,7 +150,10 @@ a Redmine ticket was created.
 
 Attachment-handling notes are added to Redmine only when an attachment was skipped
 or compressed. No note is added when attachments required no special handling or
-when the email had no attachments.
+when the email had no attachments. Upload failures are summarized without copying
+Redmine's raw error response into the ticket; for a failed MP4 upload, the note asks
+the reviewer to check the original email. The issue description is not rewritten
+because an attachment upload failed.
 
 ## Gmail Setup Requirements
 
